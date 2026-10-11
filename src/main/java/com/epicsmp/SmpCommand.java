@@ -38,6 +38,10 @@ public final class SmpCommand implements BasicCommand {
         case "stats" -> stats(sender, args);
         case "rules" -> rules(sender);
         case "withdraw" -> withdraw(sender, args);
+        case "reload" -> {
+          require(args, 1, "/smp reload");
+          reload(sender);
+        }
         case "ability" -> {
           require(args, 1, "/smp ability");
           if (!(sender instanceof Player player)) {
@@ -72,7 +76,8 @@ public final class SmpCommand implements BasicCommand {
         EpicSmpPlugin.message("/smp stats [player] | rules | withdraw [amount] | ability"));
     if (sender.hasPermission("epicsmp.admin")) {
       sender.sendMessage(EpicSmpPlugin.message("/smp admin set <player> strength <value>"));
-      sender.sendMessage(EpicSmpPlugin.message("/smp admin reload | pause | resume"));
+      sender.sendMessage(EpicSmpPlugin.message("/smp reload (apply config.yml edits)"));
+      sender.sendMessage(EpicSmpPlugin.message("/smp admin pause | resume"));
       sender.sendMessage(
           EpicSmpPlugin.message("/smp admin immunity <on|off> | weapon <player> <specialty>"));
       sender.sendMessage(EpicSmpPlugin.message("/smp admin test help (admin playtest toolbox)"));
@@ -242,7 +247,11 @@ public final class SmpCommand implements BasicCommand {
         }
         plugin.updateRule("combat.immunity-enabled", args[2].equalsIgnoreCase("on"));
       }
-      case "reload" -> plugin.reloadRules();
+      case "reload" -> {
+        require(args, 2, "/smp admin reload");
+        reload(sender);
+        return;
+      }
       case "pause" -> plugin.pause(true);
       case "resume" -> plugin.pause(false);
       case "set" -> {
@@ -273,6 +282,14 @@ public final class SmpCommand implements BasicCommand {
     }
   }
 
+  private void reload(CommandSender sender) throws IOException {
+    if (!sender.hasPermission("epicsmp.admin")) {
+      throw new IllegalArgumentException("You need epicsmp.admin to reload the configuration");
+    }
+    plugin.reloadRules();
+    sender.sendMessage(EpicSmpPlugin.message("Configuration reloaded successfully."));
+  }
+
   @Override
   public Collection<String> suggest(CommandSourceStack source, String[] args) {
     List<String> options = new ArrayList<>();
@@ -280,7 +297,7 @@ public final class SmpCommand implements BasicCommand {
     if (args.length <= 1) {
       options.addAll(List.of("help", "stats", "rules", "withdraw", "ability"));
       if (admin) {
-        options.add("admin");
+        options.addAll(List.of("admin", "reload"));
       }
     } else if (args[0].equalsIgnoreCase("admin") && admin) {
       if (args.length == 2) {

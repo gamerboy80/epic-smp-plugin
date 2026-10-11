@@ -217,7 +217,8 @@ public final class GameplayListener implements Listener {
         victim.sendMessage(EpicSmpPlugin.message("Repeat-pair protection: progression unchanged."));
       }
       for (UUID token : result.drops()) {
-        event.getDrops().add(plugin.items().item(token));
+        // Spawn these separately so keepInventory and other death-drop rules cannot erase them.
+        victim.getWorld().dropItemNaturally(victim.getLocation(), plugin.items().item(token));
       }
       plugin.abilities().clear(victim);
       plugin.refreshAll();

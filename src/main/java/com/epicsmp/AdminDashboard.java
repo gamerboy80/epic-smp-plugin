@@ -506,7 +506,10 @@ public final class AdminDashboard implements Listener {
       case 41 -> test(viewer, "lunge", target(holder.primary), "3");
       case 42 -> test(viewer, "give", target(holder.primary), "totem");
       case 43 -> viewer.performCommand("smp rules");
-      case 45 -> plugin.reloadRules();
+      case 45 -> {
+        plugin.reloadRules();
+        viewer.sendMessage(EpicSmpPlugin.message("Configuration reloaded successfully."));
+      }
       case 49 -> {
         /* Refresh below. */
       }

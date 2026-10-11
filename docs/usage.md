@@ -12,14 +12,21 @@ so vanilla Strength potions stack independently; the default potion cap permits 
 Sword damage, attack cooldown, armor, other plugins' modifiers and damage caps still apply.
 
 PvP kills gain one level and deaths lose one down to 1. Natural deaths lose one by default; set
-`strength.natural-death-loss: 0` to retain levels on environmental deaths. A capped killer's
-qualifying victim drops one Strength item if the victim had a level to lose. Both reward and
-penalty are suppressed for the same pair in either direction for 600 seconds by default.
+`strength.natural-death-loss: 0` to retain levels on uncredited environmental deaths. Each lost
+level drops as an authentic Strength item at the death location. PvP killers below the cap gain
+Strength directly; capped killers receive the victim's lost levels as physical items there. Both
+reward and penalty are suppressed for the same pair in either direction for 600 seconds by default.
+Combat-tagged environmental deaths can still be credited to the last player when
+`combat.credit-tagged-deaths` is enabled. Crafted levels dropped this way remain Crafted Strength.
+Strength items spawn separately from ordinary inventory drops, including when `keepInventory` is on.
 
 `/smp withdraw [amount]` withdraws one level by default, or the supplied positive amount, while
-keeping at least 1. Free one storage slot per item first. Right-click a **Strength** ghast tear
-in either hand to redeem one level. It can be traded and stored. A crafted contribution withdraws
-as **Crafted Strength**, which can only be redeemed below level 3. **Weapon Reroll** books change
+keeping at least 1. Free enough inventory capacity first; matching **Strength** items stack, and
+**Crafted Strength** stacks separately. Right-click in an inventory to split a stack; drag-splitting
+and hopper transfers are blocked to preserve each item's single-use token. Right-click a **Strength**
+ghast tear in either hand to redeem one level. It can be traded and stored. A crafted contribution
+withdraws as **Crafted Strength**, which can only be redeemed below level 3. **Weapon Reroll** books
+change
 to a different specialty when right-clicked. Items keep their immutable names, lore and saved IDs;
 renamed ordinary ghast tears are not accepted. Anvils, enchanting, smithing, grinding, brewing
 and ingredient use cannot transform valid custom items. A periodic scan restores their presentation.
@@ -58,8 +65,10 @@ The Shield ultimate's `abilities.shield-invulnerability` switch is independent o
 
 ## Configuration and protections
 
-Edit `plugins/EpicSmpPlugin/config.yml`, then `/smp admin reload`. Invalid snapshots are rejected and
-the current rules remain active. Strength minimum is 1, maximum permits 1–10; passive/ultimate
+Edit `plugins/EpicSmpPlugin/config.yml`, then run `/smp reload` (or `/smp admin reload`) or click
+**Reload configuration** in the admin dashboard. A success message confirms the new settings are
+active. Invalid snapshots are rejected and the current rules remain active. Strength minimum is 1,
+maximum permits 1–10; passive/ultimate
 thresholds may exceed the cap to intentionally leave abilities inaccessible.
 
 | Section | Controls |

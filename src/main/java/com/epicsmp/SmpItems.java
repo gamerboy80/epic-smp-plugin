@@ -1,8 +1,11 @@
 package com.epicsmp;
 
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 import java.util.UUID;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
@@ -19,11 +22,19 @@ import org.bukkit.event.Listener;
 import org.bukkit.event.block.Action;
 import org.bukkit.event.block.CrafterCraftEvent;
 import org.bukkit.event.enchantment.EnchantItemEvent;
+import org.bukkit.event.entity.EntityPickupItemEvent;
+import org.bukkit.event.entity.ItemMergeEvent;
 import org.bukkit.event.inventory.BrewEvent;
+import org.bukkit.event.inventory.ClickType;
 import org.bukkit.event.inventory.CraftItemEvent;
+import org.bukkit.event.inventory.InventoryClickEvent;
+import org.bukkit.event.inventory.InventoryDragEvent;
+import org.bukkit.event.inventory.InventoryMoveItemEvent;
+import org.bukkit.event.inventory.InventoryType;
 import org.bukkit.event.inventory.PrepareAnvilEvent;
 import org.bukkit.event.inventory.PrepareItemCraftEvent;
 import org.bukkit.event.inventory.PrepareSmithingEvent;
+import org.bukkit.event.player.PlayerDropItemEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.inventory.EquipmentSlot;
 import org.bukkit.inventory.ItemStack;
@@ -101,9 +112,7 @@ public final class SmpItems implements Listener {
 
   private ItemStack preview(ItemToken.Kind kind) {
     return decorate(
-        new ItemStack(kind == ItemToken.Kind.REROLL ? Material.BOOK : Material.GHAST_TEAR),
-        kind,
-        null);
+        new ItemStack(kind == ItemToken.Kind.REROLL ? Material.BOOK : Material.GHAST_TEAR), kind);
   }
 
   /** Builds an authentic issued item from its durable provenance. */
@@ -112,10 +121,14 @@ public final class SmpItems implements Listener {
     if (issued == null) {
       throw new IllegalArgumentException("Unknown custom-item token");
     }
-    return decorate(preview(issued.kind()), issued.kind(), token);
+    return decorate(preview(issued.kind()), issued.kind(), List.of(token));
   }
 
-  private ItemStack decorate(ItemStack item, ItemToken.Kind kind, UUID token) {
+  private ItemStack decorate(ItemStack item, ItemToken.Kind kind) {
+    return decorate(item, kind, List.of());
+  }
+
+  private ItemStack decorate(ItemStack item, ItemToken.Kind kind, List<UUID> tokens) {
     item.setType(kind == ItemToken.Kind.REROLL ? Material.BOOK : Material.GHAST_TEAR);
     ItemMeta meta = Bukkit.getItemFactory().getItemMeta(item.getType());
     if (meta == null) {
@@ -139,8 +152,14 @@ public final class SmpItems implements Listener {
         List.of(
             Component.text(help, NamedTextColor.WHITE).decoration(TextDecoration.ITALIC, false)));
     meta.getPersistentDataContainer().set(kindKey, PersistentDataType.STRING, kind.name());
-    if (token != null) {
-      meta.getPersistentDataContainer().set(tokenKey, PersistentDataType.STRING, token.toString());
+    if (tokens.isEmpty()) {
+      meta.getPersistentDataContainer().remove(tokenKey);
+    } else {
+      meta.getPersistentDataContainer()
+          .set(
+              tokenKey,
+              PersistentDataType.STRING,
+              String.join(",", tokens.stream().map(UUID::toString).toList()));
     }
     if (!item.setItemMeta(meta)) {
       throw new IllegalStateException("Could not apply custom item metadata");
@@ -148,13 +167,332 @@ public final class SmpItems implements Listener {
     return item;
   }
 
-  private UUID serial(ItemStack item) {
+  private List<UUID> tokens(ItemStack item) {
     String value = item.getPersistentDataContainer().get(tokenKey, PersistentDataType.STRING);
+    if (value == null || value.isBlank()) {
+      return List.of();
+    }
+    List<UUID> result = new ArrayList<>();
     try {
-      return value == null ? null : UUID.fromString(value);
+      for (String token : value.split(",", -1)) {
+        result.add(UUID.fromString(token));
+      }
+    } catch (IllegalArgumentException ignored) {
+      return List.of();
+    }
+    return result;
+  }
+
+  private ItemToken.Kind kind(ItemStack item) {
+    if (item == null || item.getType().isAir()) {
+      return null;
+    }
+    String value = item.getPersistentDataContainer().get(kindKey, PersistentDataType.STRING);
+    try {
+      return value == null ? null : ItemToken.Kind.valueOf(value);
     } catch (IllegalArgumentException ignored) {
       return null;
     }
+  }
+
+  private boolean stackable(ItemToken.Kind kind) {
+    return kind == ItemToken.Kind.STRENGTH || kind == ItemToken.Kind.CRAFTED_STRENGTH;
+  }
+
+  private boolean authentic(ItemStack item) {
+    if (item == null || item.getType().isAir()) {
+      return false;
+    }
+    ItemToken.Kind kind = kind(item);
+    List<UUID> tokens = tokens(item);
+    if (kind == null
+        || tokens.size() != item.getAmount()
+        || kind == ItemToken.Kind.REROLL && item.getAmount() != 1
+        || new HashSet<>(tokens).size() != tokens.size()) {
+      return false;
+    }
+    for (UUID token : tokens) {
+      ItemToken issued = plugin.progression().snapshot().bottles().get(token);
+      if (issued == null || issued.kind() != kind) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  private ItemStack bundle(ItemStack template, ItemToken.Kind kind, List<UUID> tokens) {
+    if (tokens.isEmpty()) {
+      return null;
+    }
+    ItemStack result = template.clone();
+    result.setAmount(tokens.size());
+    return decorate(result, kind, tokens);
+  }
+
+  private ItemStack insert(Player player, ItemStack source) {
+    ItemToken.Kind kind = kind(source);
+    if (!stackable(kind) || !authentic(source)) {
+      return source;
+    }
+    List<UUID> remaining = new ArrayList<>(tokens(source));
+    ItemStack[] storage = Objects.requireNonNull(player.getInventory().getStorageContents());
+    for (int slot = 0; slot < storage.length && !remaining.isEmpty(); slot++) {
+      ItemStack current = storage[slot];
+      if (current == null
+          || current.getType().isAir()
+          || kind(current) != kind
+          || !authentic(current)) {
+        continue;
+      }
+      List<UUID> currentTokens = tokens(current);
+      Set<UUID> alreadyPresent = new HashSet<>(currentTokens);
+      List<UUID> mergeable =
+          remaining.stream().filter(token -> !alreadyPresent.contains(token)).toList();
+      int amount =
+          Math.min(current.getMaxStackSize() - current.getAmount(), mergeable.size());
+      if (amount <= 0) {
+        continue;
+      }
+      List<UUID> moved = new ArrayList<>(mergeable.subList(0, amount));
+      List<UUID> combined = new ArrayList<>(currentTokens);
+      combined.addAll(moved);
+      ItemStack merged = bundle(current, kind, combined);
+      player.getInventory().setItem(slot, merged);
+      storage[slot] = merged;
+      remaining.removeAll(moved);
+    }
+    for (int slot = 0; slot < storage.length && !remaining.isEmpty(); slot++) {
+      ItemStack current = storage[slot];
+      if (current != null && !current.getType().isAir()) {
+        continue;
+      }
+      int amount = Math.min(source.getMaxStackSize(), remaining.size());
+      List<UUID> placed = new ArrayList<>(remaining.subList(0, amount));
+      ItemStack stored = bundle(source, kind, placed);
+      player.getInventory().setItem(slot, stored);
+      storage[slot] = stored;
+      remaining.subList(0, amount).clear();
+    }
+    return remaining.isEmpty() ? null : bundle(source, kind, remaining);
+  }
+
+  private boolean hasStorageSpace(Player player, int amount) {
+    int space = 0;
+    ItemStack[] storage = Objects.requireNonNull(player.getInventory().getStorageContents());
+    for (ItemStack item : storage) {
+      if (item == null || item.getType().isAir()) {
+        space += Material.GHAST_TEAR.getMaxStackSize();
+      } else if (stackable(kind(item)) && authentic(item)) {
+        space += Math.max(0, item.getMaxStackSize() - item.getAmount());
+      }
+      if (space >= amount) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /** Merges independent issued Strength items when they are picked up. */
+  @EventHandler(ignoreCancelled = true, priority = EventPriority.HIGHEST)
+  public void pickup(EntityPickupItemEvent event) {
+    if (!(event.getEntity() instanceof Player player)) {
+      return;
+    }
+    ItemStack source = event.getItem().getItemStack();
+    ItemToken.Kind kind = kind(source);
+    if (!stackable(kind)) {
+      return;
+    }
+    event.setCancelled(true);
+    if (!authentic(source)) {
+      return;
+    }
+    ItemStack remainder = insert(player, source);
+    if (remainder == null) {
+      event.getItem().remove();
+    } else {
+      event.getItem().setItemStack(remainder);
+      event.getItem().setPickupDelay(1);
+    }
+  }
+
+  /** Keeps token IDs aligned with stacks split or combined through inventory clicks. */
+  @EventHandler(ignoreCancelled = true, priority = EventPriority.HIGHEST)
+  public void stackClick(InventoryClickEvent event) {
+    if (!(event.getWhoClicked() instanceof Player player)) {
+      return;
+    }
+    ItemStack cursor = event.getCursor();
+    ItemStack current = event.getCurrentItem();
+    boolean customCursor = stackable(kind(cursor));
+    boolean customCurrent = stackable(kind(current));
+    if (!customCursor && !customCurrent) {
+      return;
+    }
+    if (event.getClick() == ClickType.MIDDLE || event.getClick() == ClickType.DOUBLE_CLICK) {
+      event.setCancelled(true);
+      return;
+    }
+    if (event.isShiftClick() && customCurrent) {
+      event.setCancelled(true);
+      if (authentic(current)) {
+        if (event.getClickedInventory() == player.getInventory()) {
+          if (event.getView().getTopInventory().getType() != InventoryType.CRAFTING) {
+            event.setCurrentItem(
+                insertIntoEmpty(event.getView().getTopInventory(), current.clone()));
+          }
+        } else {
+          event.setCurrentItem(insert(player, current.clone()));
+        }
+      }
+      return;
+    }
+    if (customCursor
+        && authentic(cursor)
+        && event.getClickedInventory() == null
+        && (event.isLeftClick() || event.isRightClick())) {
+      event.setCancelled(true);
+      int dropped = event.isRightClick() ? 1 : cursor.getAmount();
+      List<UUID> cursorTokens = tokens(cursor);
+      List<UUID> droppedTokens = new ArrayList<>(cursorTokens.subList(0, dropped));
+      player
+          .getWorld()
+          .dropItemNaturally(player.getLocation(), bundle(cursor, kind(cursor), droppedTokens));
+      List<UUID> remaining = new ArrayList<>(cursorTokens.subList(dropped, cursorTokens.size()));
+      event.setCursor(bundle(cursor, kind(cursor), remaining));
+      return;
+    }
+    if (customCursor && authentic(cursor) && isEmpty(current)) {
+      if (!event.isLeftClick() && !event.isRightClick()) {
+        return;
+      }
+      event.setCancelled(true);
+      int moved = event.isRightClick() ? 1 : cursor.getAmount();
+      List<UUID> cursorTokens = tokens(cursor);
+      List<UUID> placedTokens = new ArrayList<>(cursorTokens.subList(0, moved));
+      event.setCurrentItem(bundle(cursor, kind(cursor), placedTokens));
+      List<UUID> remaining = new ArrayList<>(cursorTokens.subList(moved, cursorTokens.size()));
+      event.setCursor(bundle(cursor, kind(cursor), remaining));
+      return;
+    }
+    if (customCursor
+        && customCurrent
+        && authentic(cursor)
+        && authentic(current)
+        && kind(cursor) == kind(current)
+        && (event.isLeftClick() || event.isRightClick())) {
+      event.setCancelled(true);
+      int capacity = current.getMaxStackSize() - current.getAmount();
+      int moved = Math.min(event.isRightClick() ? 1 : cursor.getAmount(), capacity);
+      if (moved < 1) {
+        return;
+      }
+      Set<UUID> combinedIds = new HashSet<>(tokens(current));
+      if (tokens(cursor).stream().anyMatch(combinedIds::contains)) {
+        return;
+      }
+      List<UUID> combined = new ArrayList<>(tokens(current));
+      combined.addAll(tokens(cursor).subList(0, moved));
+      event.setCurrentItem(bundle(current, kind(current), combined));
+      List<UUID> remaining = new ArrayList<>(tokens(cursor).subList(moved, cursor.getAmount()));
+      event.setCursor(bundle(cursor, kind(cursor), remaining));
+      return;
+    }
+    if (!customCursor
+        && customCurrent
+        && authentic(current)
+        && isEmpty(cursor)
+        && event.isRightClick()) {
+      event.setCancelled(true);
+      List<UUID> currentTokens = tokens(current);
+      int moved = (currentTokens.size() + 1) / 2;
+      List<UUID> cursorTokens = new ArrayList<>(currentTokens.subList(0, moved));
+      List<UUID> remaining = new ArrayList<>(currentTokens.subList(moved, currentTokens.size()));
+      event.setCurrentItem(bundle(current, kind(current), remaining));
+      event.setCursor(bundle(current, kind(current), cursorTokens));
+    }
+  }
+
+  /** Prevents drag-splitting from copying the same token IDs into several stacks. */
+  @EventHandler(ignoreCancelled = true, priority = EventPriority.HIGHEST)
+  public void stackDrag(InventoryDragEvent event) {
+    if (stackable(kind(event.getOldCursor()))) {
+      event.setCancelled(true);
+    }
+  }
+
+  /** Keeps hoppers from splitting authenticated bundles or merging duplicate token stacks. */
+  @EventHandler(ignoreCancelled = true, priority = EventPriority.HIGHEST)
+  public void hopperMove(InventoryMoveItemEvent event) {
+    if (custom(event.getItem())) {
+      event.setCancelled(true);
+    }
+  }
+
+  /** Stops cloned token bundles from combining into stacks with mismatched token counts. */
+  @EventHandler(ignoreCancelled = true, priority = EventPriority.HIGHEST)
+  public void merge(ItemMergeEvent event) {
+    if (stackable(kind(event.getEntity().getItemStack()))
+        || stackable(kind(event.getTarget().getItemStack()))) {
+      event.setCancelled(true);
+    }
+  }
+
+  /** Assigns separate token IDs to the dropped portion and remaining inventory stack. */
+  @EventHandler(ignoreCancelled = true, priority = EventPriority.HIGHEST)
+  public void drop(PlayerDropItemEvent event) {
+    ItemStack dropped = event.getItemDrop().getItemStack();
+    ItemToken.Kind kind = kind(dropped);
+    if (!stackable(kind)) {
+      return;
+    }
+    List<UUID> allTokens = tokens(dropped);
+    int dropAmount = dropped.getAmount();
+    if (allTokens.size() < dropAmount || new HashSet<>(allTokens).size() != allTokens.size()) {
+      event.setCancelled(true);
+      return;
+    }
+    List<UUID> droppedTokens = new ArrayList<>(allTokens.subList(0, dropAmount));
+    List<UUID> remaining = new ArrayList<>(allTokens.subList(dropAmount, allTokens.size()));
+    ItemStack source = null;
+    int sourceSlot = -1;
+    if (!remaining.isEmpty()) {
+      ItemStack[] inventory =
+          Objects.requireNonNull(event.getPlayer().getInventory().getContents());
+      for (int slot = 0; slot < inventory.length; slot++) {
+        ItemStack candidate = inventory[slot];
+        if (candidate != null
+            && kind(candidate) == kind
+            && candidate.getAmount() == remaining.size()
+            && tokens(candidate).equals(allTokens)) {
+          source = candidate;
+          sourceSlot = slot;
+          break;
+        }
+      }
+      if (source == null) {
+        event.setCancelled(true);
+        return;
+      }
+    }
+    event.getItemDrop().setItemStack(bundle(dropped, kind, droppedTokens));
+    if (source != null) {
+      event.getPlayer().getInventory().setItem(sourceSlot, bundle(source, kind, remaining));
+    }
+  }
+
+  private boolean isEmpty(ItemStack item) {
+    return item == null || item.getType().isAir();
+  }
+
+  private ItemStack insertIntoEmpty(org.bukkit.inventory.Inventory inventory, ItemStack source) {
+    for (int slot = 0; slot < inventory.getSize(); slot++) {
+      if (isEmpty(inventory.getItem(slot))) {
+        inventory.setItem(slot, source);
+        return null;
+      }
+    }
+    return source;
   }
 
   private void scan(Player player) {
@@ -163,11 +501,9 @@ public final class SmpItems implements Listener {
       for (int slot = 0; slot < contents.length; slot++) {
         ItemStack item = contents[slot];
         if (custom(item)) {
-          UUID token = serial(Objects.requireNonNull(item));
-          ItemToken issued =
-              token == null ? null : plugin.progression().snapshot().bottles().get(token);
-          if (issued != null) {
-            player.getInventory().setItem(slot, decorate(item, issued.kind(), token));
+          ItemToken.Kind kind = kind(Objects.requireNonNull(item));
+          if (authentic(item)) {
+            player.getInventory().setItem(slot, decorate(item, kind, tokens(item)));
           }
         }
       }
@@ -189,20 +525,15 @@ public final class SmpItems implements Listener {
       throw new IllegalArgumentException(
           "Withdraw a positive amount while keeping at least Strength 1");
     }
-    ItemStack[] storage = player.getInventory().getStorageContents();
-    int free = 0;
-    if (storage != null) {
-      for (ItemStack item : storage) {
-        if (item == null || item.getType().isAir()) {
-          free++;
-        }
-      }
-    }
-    if (free < amount) {
-      throw new IllegalArgumentException("Free " + amount + " inventory slots first");
+    if (!hasStorageSpace(player, amount)) {
+      throw new IllegalArgumentException(
+          "Free inventory space for " + amount + " Strength items first");
     }
     for (UUID token : plugin.progression().withdraw(player.getUniqueId(), amount)) {
-      player.getInventory().setItem(player.getInventory().firstEmpty(), item(token));
+      ItemStack remainder = insert(player, item(token));
+      if (remainder != null) {
+        throw new IllegalStateException("Could not fit withdrawn Strength items");
+      }
     }
     plugin.refresh(player);
     player.sendMessage(EpicSmpPlugin.message("Withdrew " + amount + " Strength item(s)."));
@@ -225,12 +556,13 @@ public final class SmpItems implements Listener {
     }
     Player player = event.getPlayer();
     ItemStack held = player.getInventory().getItem(hand);
-    UUID token = serial(Objects.requireNonNull(clicked));
-    if (held == null || token == null || !token.equals(serial(held))) {
+    if (held == null || !authentic(held) || !tokens(held).equals(tokens(clicked))) {
       return;
     }
     try {
       available(player);
+      List<UUID> heldTokens = tokens(held);
+      UUID token = heldTokens.getFirst();
       ItemToken issued = plugin.progression().snapshot().bottles().get(token);
       if (issued == null) {
         throw new IllegalArgumentException("Invalid or already used custom item");
@@ -245,7 +577,10 @@ public final class SmpItems implements Listener {
       } else {
         plugin.progression().redeem(player.getUniqueId(), token);
       }
-      player.getInventory().setItem(hand, held.subtract(1));
+      List<UUID> remaining = new ArrayList<>(heldTokens);
+      remaining.removeFirst();
+      player.getInventory().setItem(
+          hand, remaining.isEmpty() ? null : bundle(held, issued.kind(), remaining));
       plugin.refresh(player);
     } catch (IllegalArgumentException e) {
       player.sendMessage(EpicSmpPlugin.message(e.getMessage()));
@@ -301,11 +636,18 @@ public final class SmpItems implements Listener {
       return;
     }
     ItemStack cursor = event.getCursor();
+    boolean emptyCursor = isEmpty(cursor);
+    boolean matchingStrengthStack =
+        kind == ItemToken.Kind.CRAFTED_STRENGTH
+            && authentic(cursor)
+            && kind(cursor) == kind
+            && cursor.getAmount() < cursor.getMaxStackSize();
     if (event.isShiftClick()
         || !event.isLeftClick() && !event.isRightClick()
-        || cursor != null && !cursor.getType().isAir()) {
+        || !emptyCursor && !matchingStrengthStack) {
       player.sendMessage(
-          EpicSmpPlugin.message("Craft custom items one at a time with an empty cursor."));
+          EpicSmpPlugin.message(
+              "Craft custom items one at a time onto an empty cursor or matching Strength stack."));
       return;
     }
     try {
@@ -319,7 +661,13 @@ public final class SmpItems implements Listener {
         }
       }
       event.getInventory().setMatrix(matrix);
-      player.setItemOnCursor(item(token));
+      if (emptyCursor) {
+        player.setItemOnCursor(item(token));
+      } else {
+        List<UUID> combined = new ArrayList<>(tokens(cursor));
+        combined.add(token);
+        player.setItemOnCursor(bundle(cursor, kind, combined));
+      }
     } catch (IllegalArgumentException e) {
       player.sendMessage(EpicSmpPlugin.message(e.getMessage()));
     } catch (IOException e) {

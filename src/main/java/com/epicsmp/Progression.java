@@ -103,21 +103,20 @@ public final class Progression {
             victim.strength() - loss,
             settings.integer("strength.minimum"),
             settings.integer("strength.maximum"));
+    int lostStrength = victim.strength() - strength;
     if (pvp) {
       int gain =
           clamp(
               killer.strength() + settings.integer("strength.per-kill"),
               settings.integer("strength.minimum"),
               settings.integer("strength.maximum"));
-      if (killer.strength() == settings.integer("strength.maximum")
-          && victim.strength() > 1
-          && loss > 0) {
-        UUID token = UUID.randomUUID();
-        bottles.put(token, new ItemToken(killerId, ItemToken.Kind.STRENGTH));
-        drops.add(token);
+      if (killer.strength() == settings.integer("strength.maximum")) {
+        addDeathDrops(bottles, drops, victim, killerId, lostStrength);
       }
       players.put(killerId, killer.progress(gain, killer.kills() + 1, killer.deaths()));
       pairs.put(pair, now + settings.integer("combat.repeat-pair-seconds") * 1000L);
+    } else {
+      addDeathDrops(bottles, drops, victim, victimId, lostStrength);
     }
     players.put(
         victimId,
@@ -126,6 +125,25 @@ public final class Progression {
             .identity(victim.name(), protectionExpiry(now, "combat.respawn-protection-seconds")));
     commit(new State(players, pairs, bottles));
     return new DeathResult(true, false, List.copyOf(drops));
+  }
+
+  private static void addDeathDrops(
+      Map<UUID, ItemToken> bottles,
+      List<UUID> drops,
+      Profile victim,
+      UUID issuer,
+      int lostStrength) {
+    int craftedDrops = Math.min(victim.craftedStrength(), lostStrength);
+    for (int index = 0; index < lostStrength; index++) {
+      UUID token;
+      do {
+        token = UUID.randomUUID();
+      } while (bottles.containsKey(token));
+      ItemToken.Kind kind =
+          index < craftedDrops ? ItemToken.Kind.CRAFTED_STRENGTH : ItemToken.Kind.STRENGTH;
+      bottles.put(token, new ItemToken(issuer, kind));
+      drops.add(token);
+    }
   }
 
   /** Applies a saved admin Strength edit within the configured limits. */

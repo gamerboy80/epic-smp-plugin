@@ -5,8 +5,9 @@ configurable combat management.
 
 - Strength starts at **1**, ranges from **1–5**, and adds **1.5 melee damage per level above 1**.
   Earned Strength uses an owned attribute modifier. Vanilla Strength potions stack independently.
-- PvP kills grant one level; deaths remove one down to the floor. Natural-death loss is configurable.
-  A capped killer receives a physical Strength item when the victim can lose a level.
+- PvP kills grant Strength directly to killers below the cap. Capped killers receive the victim's
+  lost Strength as physical items at the death location. Uncredited mob and environmental deaths
+  also drop the Strength lost there.
 - `/smp withdraw [amount]` exchanges excess Strength for named **ghast tears**. Right-click to
   redeem or trade them. Saved single-use IDs prevent replay; custom items cannot be renamed,
   enchanted, brewed or consumed in other recipes. Crafted Strength works up to level 3 and keeps
@@ -35,11 +36,11 @@ database or companion plugin is required.
 | `/smp rules` | Inspect current restrictions |
 | `/smp withdraw [amount]` | Withdraw levels while keeping at least 1 |
 | `/smp ability` | Activate your held specialty's ultimate |
+| `/smp reload` | Validate and apply edited `config.yml` (admin only) |
 | `/smp admin menu` | Inventory dashboard and player test controls |
 | `/smp admin set <player> strength <value>` | Save an online/offline account edit |
 | `/smp admin weapon <player> <specialty>` | Assign a specialty for testing |
 | `/smp admin immunity <on\|off>` | Persist the automatic immunity switch |
-| `/smp admin reload` | Validate edited config and activate it |
 | `/smp admin pause` / `resume` | Temporarily pause PvP and progression |
 | `/smp admin test help` | Playtest tags, items, abilities, damage, XP, potions and progression |
 

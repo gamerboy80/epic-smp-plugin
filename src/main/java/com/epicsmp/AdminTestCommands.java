@@ -172,7 +172,7 @@ public final class AdminTestCommands {
         plugin.refreshAll();
         tell(
             sender,
-            "Real progression transaction; no physical death/drops. Applied="
+            "Real progression transaction; no physical death. Strength items may drop. Applied="
                 + result.applied()
                 + ", protection/anti-farm="
                 + result.protectedKill());

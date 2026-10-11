@@ -7,10 +7,12 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
+import net.kyori.adventure.text.format.TextDecoration;
 import org.bukkit.Bukkit;
 import org.bukkit.NamespacedKey;
 import org.bukkit.attribute.Attribute;
@@ -287,16 +289,69 @@ public class EpicSmpPlugin extends JavaPlugin {
 
   /** Builds literal player-facing text. */
   public static Component message(String text) {
-    return Component.text("[EpicSMP] ", NamedTextColor.GOLD)
-        .append(Component.text(text, NamedTextColor.WHITE));
+    String normalized = text.toLowerCase(Locale.ROOT);
+    if (text.startsWith("/")) {
+      return Component.text(text, NamedTextColor.AQUA).decorate(TextDecoration.BOLD);
+    }
+    if (containsAny(
+        normalized,
+        "failed",
+        "unavailable",
+        "cannot",
+        "can't",
+        "blocked",
+        "closed",
+        "is disabled",
+        "unknown",
+        "exceed",
+        "requires",
+        "you need",
+        "must ")) {
+      return Component.text(text, NamedTextColor.RED);
+    }
+    if (containsAny(
+        normalized,
+        "successfully",
+        "saved:",
+        "settings/progression updated",
+        "withdrew ",
+        "ultimate active")) {
+      return Component.text(text, NamedTextColor.GREEN);
+    }
+    return Component.text(text, NamedTextColor.GRAY);
   }
 
   private void announce(Player player, Profile profile) {
     Integer previous = notices.put(player.getUniqueId(), profile.strength());
     if (previous == null || previous != profile.strength()) {
-      player.sendMessage(
-          message("Strength: " + (previous == null ? "" : previous + " → ") + profile.strength()));
+      Component notice =
+          Component.text("Strength: ", NamedTextColor.GOLD).decorate(TextDecoration.BOLD);
+      if (previous != null) {
+        notice =
+            notice
+                .append(Component.text(Integer.toString(previous), NamedTextColor.GRAY))
+                .append(Component.text(" → ", NamedTextColor.DARK_GRAY));
+      }
+      NamedTextColor levelColor =
+          previous == null || profile.strength() >= previous
+              ? NamedTextColor.GREEN
+              : NamedTextColor.RED;
+      notice =
+          notice
+              .append(
+                  Component.text(Integer.toString(profile.strength()), levelColor)
+                      .decorate(TextDecoration.BOLD));
+      player.sendMessage(notice);
     }
+  }
+
+  private static boolean containsAny(String text, String... phrases) {
+    for (String phrase : phrases) {
+      if (text.contains(phrase)) {
+        return true;
+      }
+    }
+    return false;
   }
 
   /** Resets chat notification tracking when a player leaves. */

@@ -38,6 +38,7 @@ import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.inventory.InventoryDragEvent;
 import org.bukkit.event.inventory.InventoryType;
 import org.bukkit.event.player.PlayerCommandPreprocessEvent;
+import org.bukkit.event.player.PlayerDropItemEvent;
 import org.bukkit.event.player.PlayerExpChangeEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.event.player.PlayerItemConsumeEvent;
@@ -830,22 +831,79 @@ class PluginIntegrationTest {
     assertEquals(1, plugin.progression().profile(attacker.getUniqueId()).strength());
     ItemStack first = attacker.getInventory().getItem(0);
     assertEquals(Material.GHAST_TEAR, first.getType());
+    assertEquals(2, first.getAmount());
     assertEquals("Strength", plain(first.getItemMeta().displayName()));
     final ItemStack copy = first.clone();
     victim.getInventory().setItemInOffHand(first);
     attacker.getInventory().setItem(0, null);
     useCustom(victim, EquipmentSlot.OFF_HAND);
     assertEquals(2, plugin.progression().profile(victim.getUniqueId()).strength());
+    assertEquals(1, victim.getInventory().getItemInOffHand().getAmount());
     victim.getInventory().setItemInMainHand(copy);
     useCustom(victim, EquipmentSlot.HAND);
     assertEquals(2, plugin.progression().profile(victim.getUniqueId()).strength());
-    assertEquals(Material.GHAST_TEAR, victim.getInventory().getItemInMainHand().getType());
-    ItemStack second = attacker.getInventory().getItem(1);
+    assertEquals(2, victim.getInventory().getItemInMainHand().getAmount());
+    ItemStack second = victim.getInventory().getItemInOffHand();
+    victim.getInventory().setItemInOffHand(null);
     victim.getInventory().setItemInMainHand(second);
-    plugin.progression().set(victim.getUniqueId(), "strength", 5);
     useCustom(victim, EquipmentSlot.HAND);
-    assertEquals(second, victim.getInventory().getItemInMainHand());
+    assertEquals(3, plugin.progression().profile(victim.getUniqueId()).strength());
+    plugin.progression().set(victim.getUniqueId(), "strength", 5);
+    java.util.UUID cappedToken =
+        plugin.progression().issue(victim.getUniqueId(), ItemToken.Kind.STRENGTH);
+    ItemStack cappedItem = plugin.items().item(cappedToken);
+    victim.getInventory().setItemInMainHand(cappedItem);
+    useCustom(victim, EquipmentSlot.HAND);
+    assertEquals(cappedItem, victim.getInventory().getItemInMainHand());
     assertEquals(1, plugin.progression().snapshot().bottles().size());
+  }
+
+  @Test
+  void strengthItemStacksMergeOnPickupAndRedeemIndividually() throws IOException {
+    java.util.UUID firstToken =
+        plugin.progression().issue(attacker.getUniqueId(), ItemToken.Kind.STRENGTH);
+    final java.util.UUID secondToken =
+        plugin.progression().issue(attacker.getUniqueId(), ItemToken.Kind.STRENGTH);
+    org.bukkit.entity.Item firstDrop =
+        attacker.getWorld().dropItem(attacker.getLocation(), plugin.items().item(firstToken));
+    EntityPickupItemEvent firstPickup = new EntityPickupItemEvent(attacker, firstDrop, 0);
+    server.getPluginManager().callEvent(firstPickup);
+    assertTrue(firstPickup.isCancelled());
+    assertFalse(firstDrop.isValid());
+    org.bukkit.entity.Item secondDrop =
+        attacker.getWorld().dropItem(attacker.getLocation(), plugin.items().item(secondToken));
+    EntityPickupItemEvent secondPickup = new EntityPickupItemEvent(attacker, secondDrop, 0);
+    server.getPluginManager().callEvent(secondPickup);
+    assertTrue(secondPickup.isCancelled());
+    ItemStack stack = attacker.getInventory().getItem(0);
+    assertEquals(2, stack.getAmount());
+    assertEquals(2, plugin.progression().snapshot().bottles().size());
+    ItemStack droppedStack = stack.clone();
+    droppedStack.setAmount(1);
+    ItemStack remainingStack = stack.clone();
+    remainingStack.setAmount(1);
+    attacker.getInventory().setItem(0, remainingStack);
+    org.bukkit.entity.Item droppedEntity =
+        attacker.getWorld().dropItem(attacker.getLocation(), droppedStack);
+    PlayerDropItemEvent drop = new PlayerDropItemEvent(attacker, droppedEntity);
+    server.getPluginManager().callEvent(drop);
+    assertFalse(drop.isCancelled());
+    assertEquals(1, droppedEntity.getItemStack().getAmount());
+    assertEquals(1, attacker.getInventory().getItem(0).getAmount());
+    EntityPickupItemEvent rePickup = new EntityPickupItemEvent(attacker, droppedEntity, 0);
+    server.getPluginManager().callEvent(rePickup);
+    assertTrue(rePickup.isCancelled());
+    assertEquals(2, attacker.getInventory().getItem(0).getAmount());
+    attacker.getInventory().setItemInMainHand(attacker.getInventory().getItem(0));
+    useCustom(attacker, EquipmentSlot.HAND);
+    assertEquals(2, plugin.progression().profile(attacker.getUniqueId()).strength());
+    assertEquals(1, attacker.getInventory().getItemInMainHand().getAmount());
+    useCustom(attacker, EquipmentSlot.HAND);
+    assertEquals(3, plugin.progression().profile(attacker.getUniqueId()).strength());
+    assertTrue(
+        attacker.getInventory().getItemInMainHand() == null
+            || attacker.getInventory().getItemInMainHand().getType().isAir());
+    assertEquals(0, plugin.progression().snapshot().bottles().size());
   }
 
   @Test
