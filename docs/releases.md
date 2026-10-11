@@ -1,39 +1,29 @@
-# Releases and versioning
+# Builds and releases
 
-## PaperMC version mapping
+EpicSmpPlugin supports **Paper 26.2 with Java 25**. The pinned compile API is
+`io.papermc.paper:paper-api:26.2.build.132-stable`. Spigot and Folia are unsupported.
 
-Replace this example with the Paper versions your plugin supports.
+```bash
+./gradlew clean build integrationTest --no-daemon --console=plain
+./gradlew -Pver="v1.0.0" release --no-daemon --console=plain
+```
 
-| PaperMC | Plugin version |
-|---------|----------------|
-| 26.1.2  | 5.0.0+        |
-| 1.21.11 | 4.0.18        |
-| 1.20.6  | 3.11.0        |
-| 1.19.4  | 3.2.1         |
-| 1.18.2  | 3.0.2         |
-| 1.17.1  | 2.2.0         |
-| 1.16.5  | 2.1.2         |
+Snapshots produce `build/libs/EpicSmpPlugin-<version>.jar`. A stable release produces
+`build/libs/EpicSmpPlugin.jar`. A stable version requires an explicit `vX.Y.Z` property;
+this does not publish a GitHub release by itself.
 
-Start from the latest tagged template release, then set the Paper API and supported server versions
-for your plugin.
+- Without `-Pver`, version is `yyMMdd-HHmm-SNAPSHOT` in UTC.
+- `-Pver=vX.Y.Z-RC-N` produces `X.Y.Z-RC-N-SNAPSHOT`.
+- `-Pver=vX.Y.Z` produces `X.Y.Z`.
 
-## Versioning strategy
+`build` includes unit tests, Checkstyle and SpotBugs. Run `integrationTest` separately or include
+it in the same invocation. CI builds on Linux and Windows with Java 25 and exercises storage/plugin
+integration on Linux. Existing tag workflows prepare draft releases and optional Discord
+notifications only when their repository variables/secrets are configured.
 
-Stable plugin versions are tagged `vX.Y.Z` and have an associated GitHub release.
+Before shipping, inspect processed `plugin.yml`, verify that only one plugin JAR is installed,
+and run the server playtest checklist in [usage.md](usage.md). Build success and MockBukkit tests
+are not a claim of full client/server testing with a particular server's other plugins.
 
-Testing plugin versions are tagged `vX.Y.Z-RC-N` and have an associated GitHub pre-release.
-
-Development plugin versions are pushed to the `main` branch and are **not** tagged.
-
-| Event             | Plugin version        | CI action                      | Release type      |
-|-------------------|-----------------------|--------------------------------|-------------------|
-| PR                | yyMMdd-HHmm-SNAPSHOT  | Build and test                 | None              |
-| Push to `main`    | 0.0.0-RC-1-SNAPSHOT   | Build, upload, and notify      | None              |
-| Tag `vX.Y.Z-RC-N` | X.Y.Z-RC-N-SNAPSHOT   | Build, draft, and notify       | Pre-release draft |
-| Tag `vX.Y.Z`      | X.Y.Z                 | Build, draft, and notify       | Release draft     |
-
-## Creating a release
-
-1. Create a semantic version tag on `main`, such as `v0.1.0` or `v0.1.0-RC-1`.
-2. Push the tag and wait for the tag workflow to create a draft release.
-3. Review and publish the generated draft.
+Windows agent terminals must use the deadline/log-redirection procedure in
+[run-plugin](../.agents/skills/run-plugin/SKILL.md) for every Gradle invocation.

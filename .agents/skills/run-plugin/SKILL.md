@@ -1,9 +1,9 @@
 ---
 name: run-plugin
-description: Build, test, and release this PaperMC/Spigot plugin from source. Use when asked to build the plugin, run its tests, run a single test class, or produce a release JAR.
+description: Build, test, and release this Paper plugin from source. Use when asked to build the plugin, run its tests, run a single test class, or produce a release JAR.
 ---
 
-This is a PaperMC/Spigot plugin — "running" it means building from source, executing the test
+This is a Paper 26.2 / Java 25 plugin — "running" it means building from source, executing the test
 suite, and optionally producing the shaded JAR that gets dropped into a server's `plugins/`
 folder.
 
@@ -55,23 +55,21 @@ when working through a Windows agent terminal.
 # Run tests only
 ./gradlew test
 
-# Run integration tests against real cw-commons implementations
+# Run integration tests against real YAML snapshots and a MockBukkit Paper server
 ./gradlew integrationTest
 
 # Run a single test class
-./gradlew test --tests "com.example.plugin.command.PingTest"
+./gradlew test --tests "com.epicsmp.ProgressionTest"
 
 # Run a single test method
-./gradlew test --tests "com.example.plugin.GreetTest.greetsTarget"
+./gradlew test --tests "com.epicsmp.ProgressionTest.qualifyingKillUpdatesStrengthExactlyOnceAndKeepsFloor"
 ```
 
 Checkstyle enforces Google Java style with `maxWarnings = 0` — the build fails on any warning. SpotBugs runs FindSecBugs. Both run as part of `build`; fix all findings before committing.
 
-Command executor unit tests (`Ping`, `Greet`, etc.) use Mockito directly — mock `CommandArguments` and `CommandSender`/`Player`, then call `run()`. No server or plugin lifecycle needed. Mockito must be declared explicitly as `testImplementation 'org.mockito:mockito-core:...'` — it is not provided transitively.
-
-Integration tests live under `src/integrationTest` and use the pinned cw-commons dependency rather
-than mocking it. Use JUnit `@TempDir` for generated configuration and SQLite files so tests do not
-modify or leave data in the worktree. Run this suite separately with `./gradlew integrationTest`.
+Tests cover Strength progression, custom items and weapon abilities, configuration, combat tags and event behavior. MockBukkit
+provides a Paper 26.2 API environment; Mockito mocks selected boundaries. Integration tests use
+real YAML storage and JUnit temporary directories. Keep tests independent of a production server.
 
 ## Release JAR
 
@@ -105,21 +103,15 @@ Keep these in sync with the current state of the project:
 
 ## Gotchas
 
-- **`minimize()` silently strips reflection/SPI-only dependencies** — `shadowJar`'s `minimize()`
-  only treats a dependency as "used" if *this project's own compiled classes* reference it
-  directly. A library only referenced from inside an already-`exclude`d dependency (e.g.
-  cw-commons calling into a JDBC/driver library) looks unused and gets stripped down to empty
-  `package-info.class` stubs, causing `NoClassDefFoundError` at runtime even though the build
-  succeeds. Add an `exclude(dependency("group:artifact:.*"))` entry under `minimize` for any
-  such dependency, mirroring the existing `cw-commons` entry (which works around the same
-  problem for its bundled SQLite driver).
+- **Packaging** — the plugin has no runtime dependencies to shade. If adding one, review
+  relocation and reflection/SPI preservation before enabling minimization.
 - **OneDrive build lock** — if this repo lives under OneDrive, `./gradlew build` can fail with
   `Unable to delete directory '...\build\classes\java\main'` (or `...\test\binary`, or other
   `build/` subdirectories) because OneDrive holds a sync lock on it. Delete the offending
   directory manually (e.g. `rm -rf build/classes/java/main`) and retry.
-- **Commands declared in both `plugin.yml` and `onEnable()`** — CommandAPI registers commands
-  programmatically; don't add a matching `commands:` entry to `plugin.yml` or Bukkit
-  double-registers it, which CommandAPI flags at startup with a warning.
+- **Command registration** — native Paper commands are registered through `registerCommand`;
+  do not declare the same commands in `plugin.yml`.
+
 - **Mockito javaagent** — `mockito-core` is wired into a dedicated `mockitoAgent` configuration
   and attached via `-javaagent` in `tasks.test` to avoid the inline-mock-maker self-attach
   warning. Don't drop this wiring when customizing the template, and remember Mockito must stay

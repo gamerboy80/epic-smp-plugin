@@ -1,15 +1,20 @@
 main: ${PACKAGE}.${NAME}
 name: ${NAME}
 version: "${VERSION}"
-api-version: "26.1.2"
-author: AUTHOR
-description: DESCRIPTION
+api-version: "26.2"
+description: Strength progression and configurable SMP combat management.
 permissions:
-  example.use:
-    description: Allows use of the /example command
+  epicsmp.use:
+    description: View Strength, weapon specialties and server rules
     default: true
-  example.*:
-    description: Grants all other permissions
-    default: false
+  epicsmp.admin:
+    description: Manage progression, rules and plugin configuration
+    default: op
     children:
-      example.use: true
+      epicsmp.admin.test: true
+  epicsmp.admin.test:
+    description: Run test commands affecting real progression, items, combat and effects
+    default: op
+  epicsmp.bypass:
+    description: Bypass item restrictions, cooldowns, and blocked combat commands
+    default: false

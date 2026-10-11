@@ -1,13 +1,90 @@
-# Response message for /example ping.
-# Supports MiniMessage formatting: https://docs.advntr.dev/minimessage/format.html
-pong-message: "Pong!"
-
-# Response message for /example greet <player>.
-# Use {player} as a placeholder for the target player's name.
-# Supports MiniMessage formatting: https://docs.advntr.dev/minimessage/format.html
-greet-message: "Hello, {player}!"
-
-# Response message for /example creepersKilled.
-# Use {count} as a placeholder for the sender's creeper-kill count.
-# Supports MiniMessage formatting: https://docs.advntr.dev/minimessage/format.html
-creepers-killed-message: "You have killed {count} creeper(s)!"
+# EpicSmpPlugin for Paper 26.2 / Java 25. See docs/usage.md and docs/design.md.
+strength:
+  starting: 1
+  minimum: 1
+  maximum: 5
+  per-kill: 1
+  natural-death-loss: 1
+  crafted-maximum: 3
+  # Flat melee damage above baseline 1; level 5 adds 6 HP (vanilla Strength II).
+  damage-per-level: 1.5
+combat:
+  # Controls timed immunity and spawn safety together. Off clears saved grace on reload.
+  immunity-enabled: false
+  tag-seconds: 30
+  repeat-pair-seconds: 600
+  new-player-protection-seconds: 300
+  respawn-protection-seconds: 20
+  # Death to lava/fall/void during a tag credits the last attacker.
+  credit-tagged-deaths: true
+  punish-logout: true
+  block-elytra: true
+  # Prevent escaping tags through portals or cross-world teleports.
+  block-world-change: true
+  block-riptide: true
+  block-storage-restocking: true
+  block-lava: true
+  # Applies to aliases and namespaced commands. /smp rules and stats remain usable.
+  blocked-commands: [home, sethome, spawn, tpa, tpaccept, back, warp, rtp, fly]
+  # Additional protection around each world's spawn, horizontal radius in blocks.
+  spawn-safe-radius: 32
+  # Worlds excluded from progression, combat tagging, and spawn protection.
+  excluded-worlds: []
+rules:
+  pvp: true
+  # Existing mace enchantments are stripped as well as blocked at enchanting/anvils.
+  disabled-mace-enchants: [density, breach, wind_burst, unbreaking, mending, vanishing_curse]
+  allow-mace: true
+  allow-end-crystals: false
+  allow-respawn-anchor-explosions: false
+  allow-explosive-beds: false
+  allow-totems: false
+  allow-ender-pearls: false
+  allow-enchanted-golden-apples: false
+  allow-netherite-armor: false
+  allow-tnt-minecarts: false
+  allow-harmful-effects: false
+  # Limits final incoming PvP damage; 0 disables the cap. 24 HP = 12 hearts.
+  maximum-pvp-damage: 24.0
+limits:
+  # Shared by all spear materials and hands; 0 leaves vanilla Lunge timing.
+  spear-lunge-cooldown-seconds: 3
+  # Successful melee hits only; shared by all maces. 0 disables this extra cooldown.
+  mace-hit-cooldown-seconds: 5
+  # Final incoming explosion damage to players, even without an attributed attacker.
+  maximum-explosion-damage: 24.0
+  # Season gates apply to portals and plugin teleports, including untagged players.
+  allow-nether: true
+  allow-end: true
+  allow-tipped-arrows: true
+  # Zero removes an enchant; positive values cap it on all equipment. Books are preserved.
+  enchantments: {lunge: 3, fire_aspect: 0, flame: 0}
+  # One-based levels; 0 blocks the effect. Vanilla Strength stacks with earned Strength.
+  # Applies to drink/splash/cloud/arrows/beacons/commands, including existing effects.
+  potions: {strength: 2, speed: 2, resistance: 1}
+  # Acquisition and use limits; excess existing items are retained but cannot be used.
+  # Counts storage, armor, offhand and cursor, excluding containers nested inside items.
+  inventory: {TOTEM_OF_UNDYING: 1, ENCHANTED_GOLDEN_APPLE: 4}
+cooldowns:
+  ENDER_PEARL: 15
+  WIND_CHARGE: 3
+  GOLDEN_APPLE: 10
+  ENCHANTED_GOLDEN_APPLE: 60
+  CHORUS_FRUIT: 20
+display:
+  # Replace public death messages with "Victim was slain." for invisible killers.
+  hide-invisible-killers: true
+abilities:
+  enabled: true
+  passive-strength: 2
+  ultimate-strength: 5
+  # This earned Shield ultimate is independent of automatic spawn/grace immunity.
+  shield-invulnerability: true
+  trident-lightning-damage: 2.0
+  crossbow-pull-chance: 0.33
+  # Shared per player so rerolling or changing weapons cannot reset an ultimate cooldown.
+  cooldowns: {sword: 90, axe: 120, bow: 60, crossbow: 60, trident: 60, shield: 120}
+recipes:
+  strength: true
+  weapon-reroll: true
+  golden-apple: true

@@ -1,6 +1,8 @@
 import com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar
 import com.github.spotbugs.snom.SpotBugsTask
 import org.gradle.api.plugins.jvm.JvmTestSuite
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.TimeZone
@@ -13,7 +15,7 @@ plugins {
     java
 }
 
-group = "com.crimsonwarpedcraft.exampleplugin"
+group = "com.epicsmp"
 
 fun getTime(): String {
     val sdf = SimpleDateFormat("yyMMdd-HHmm")
@@ -51,14 +53,6 @@ repositories {
     }
 
     mavenCentral()
-
-    maven {
-        name = "jitpack"
-        url = uri("https://jitpack.io")
-        content {
-            includeGroup("com.github.CrimsonWarpedcraft")
-        }
-    }
 }
 
 val mockitoAgent = configurations.create("mockitoAgent")
@@ -74,17 +68,7 @@ dependencies {
     testImplementation("org.junit.jupiter:junit-jupiter:6.1.3")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher:6.1.3")
 
-    // Example dependencies. Paper plugins do not require these libraries.
-    implementation("com.github.CrimsonWarpedcraft:cw-commons:v0.3.3")
-    // PluginConfig imports annotations from Jackson and Hibernate Validator directly.
-    implementation("com.fasterxml.jackson.dataformat:jackson-dataformat-yaml:2.22.3")
-    implementation("dev.jorel:commandapi-paper-shade:12.1.0") {
-        // Upstream metadata references unpublished modules already bundled in this JAR.
-        // https://github.com/CommandAPI/CommandAPI/issues/704
-        isTransitive = false
-    }
-    implementation("org.hibernate.validator:hibernate-validator:9.1.4.Final")
-
+    testImplementation("org.mockbukkit.mockbukkit:mockbukkit-v26.2:4.117.0")
     testImplementation("org.mockito:mockito-core:5.24.0")
     mockitoAgent("org.mockito:mockito-core:5.24.0") { isTransitive = false }
 }
@@ -95,16 +79,18 @@ tasks.test {
 }
 
 tasks.runServer {
-    minecraftVersion("26.1.2")
+    minecraftVersion("26.2")
 }
 
 testing {
     suites {
         register<JvmTestSuite>("integrationTest") {
-            useJUnitJupiter("6.1.1")
+            useJUnitJupiter("6.1.3")
 
             dependencies {
                 implementation(sourceSets.main.get().output)
+                implementation("org.mockbukkit.mockbukkit:mockbukkit-v26.2:4.117.0")
+                implementation("org.mockito:mockito-core:5.24.0")
                 implementation("io.papermc.paper:paper-api:26.2.build.132-stable")
             }
 
@@ -112,7 +98,7 @@ testing {
                 all {
                     testTask.configure {
                         shouldRunAfter(tasks.test)
-                        jvmArgs("--enable-native-access=ALL-UNNAMED")
+                        jvmArgs("--enable-native-access=ALL-UNNAMED", "-javaagent:${mockitoAgent.asPath}")
                     }
                 }
             }
@@ -164,26 +150,6 @@ val shadowJar = tasks.named<ShadowJar>("shadowJar") {
         duplicatesStrategy = DuplicatesStrategy.INCLUDE
     }
     mergeServiceFiles()
-    relocate("dev.jorel.commandapi", "${project.group}.commandapi")
-    relocate("com.fasterxml", "${project.group}.fasterxml")
-    relocate("org.yaml.snakeyaml", "${project.group}.snakeyaml")
-    relocate("org.hibernate.validator", "${project.group}.hibernatevalidator")
-    relocate("jakarta.validation", "${project.group}.jakartavalidation")
-    relocate("org.jboss.logging", "${project.group}.jbosslogging")
-    // These libs load classes via reflection or SPI and must not be minimized
-    minimize {
-        exclude(dependency("dev.jorel:commandapi-paper-shade:.*"))
-        exclude(dependency("com.fasterxml.jackson.core:.*:.*"))
-        exclude(dependency("com.fasterxml.jackson.dataformat:.*:.*"))
-        exclude(dependency("com.fasterxml:classmate:.*"))
-        exclude(dependency("org.hibernate.validator:.*:.*"))
-        exclude(dependency("jakarta.validation:.*:.*"))
-        exclude(dependency("org.yaml:snakeyaml:.*"))
-        exclude(dependency("org.jboss.logging:.*:.*"))
-        // cw-commons bundles the SQLite JDBC driver (loaded via SPI) inside its own jar;
-        // it never appears as a separate resolvable dependency, so it must be excluded by name.
-        exclude(dependency("com.github.CrimsonWarpedcraft:cw-commons:.*"))
-    }
 }
 
 tasks.jar {
@@ -206,7 +172,8 @@ tasks.register("release") {
     doLast {
         if (!version.toString().endsWith("-SNAPSHOT")) {
             val releaseJar = layout.buildDirectory.file("libs/${rootProject.name}.jar").get().asFile
-            shadowJar.get().archiveFile.get().asFile.renameTo(releaseJar)
+            Files.move(shadowJar.get().archiveFile.get().asFile.toPath(),
+                releaseJar.toPath(), StandardCopyOption.REPLACE_EXISTING)
         }
     }
 }

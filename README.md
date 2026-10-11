@@ -1,71 +1,62 @@
-# PaperMC/Spigot Minecraft Server Plugin Template
-A template for building PaperMC/Spigot Minecraft server plugins!
+# EpicSmpPlugin
 
-<!-- TODO: CHANGE ME -->
-[![](https://github.com/CrimsonWarpedcraft/plugin-template/actions/workflows/main.yml/badge.svg)](https://github.com/CrimsonWarpedcraft/plugin-template/actions/workflows/main.yml)
+A **Paper 26.2 / Java 25** Strength SMP plugin with Season Four weapon specialties, crafting and
+configurable combat management.
 
-<!-- TODO: CHANGE ME -->
-[![](https://dcbadge.limes.pink/api/server/5XMmeV6EtJ)](https://discord.gg/5XMmeV6EtJ)
+- Strength starts at **1**, ranges from **1–5**, and adds **1.5 melee damage per level above 1**.
+  Earned Strength uses an owned attribute modifier. Vanilla Strength potions stack independently.
+- PvP kills grant one level; deaths remove one down to the floor. Natural-death loss is configurable.
+  A capped killer receives a physical Strength item when the victim can lose a level.
+- `/smp withdraw [amount]` exchanges excess Strength for named **ghast tears**. Right-click to
+  redeem or trade them. Saved single-use IDs prevent replay; custom items cannot be renamed,
+  enchanted, brewed or consumed in other recipes. Crafted Strength works up to level 3 and keeps
+  that provenance through withdrawal and trading.
+- Six random, persistent specialties: Sword, Axe, Bow, Crossbow, Trident and Shield. Passives
+  unlock at Strength 2 and ultimates at 5. Craft a Weapon Reroll to change specialty.
+- Season Four crafting recipes for Strength, rerolls and four-ingot golden apples.
+- Combat tags, logout deaths, persistent repeat-pair farming limits, item cooldowns, spear Lunge
+  and mace timing, enchant/effect/inventory caps, explosion limits and dimension switches.
+- Automatic immunity is **off by default**; `/smp admin immunity on|off` controls spawn safety
+  and join/respawn grace. The Shield specialty's earned ultimate has its own toggle.
+- Strength changes appear in chat. Invisible killers receive anonymous death messages by default,
+  controlled by `display.hide-invisible-killers`.
+- Six-row admin inventory dashboard, player selectors, persistent rule toggles and a playtest toolbox.
+- Atomic UUID-based YAML snapshots, previous-commit backups, offline admin edits and validated reloads.
 
-## Features
-### Github Actions 🎬
-* Automated builds, testing, and release drafting
-* [Discord notifcations](https://github.com/marketplace/actions/discord-message-notify) for snapshots and releases
+## Install and commands
 
-### Bots 🤖
-* **Probot: Stale**
-    * Mark issues stale after 30 days
-* **Dependabot**
-    * Update GitHub Actions workflows
-    * Update Gradle dependencies
+Build with `./gradlew build integrationTest`, or copy `build/libs/EpicSmpPlugin.jar` from a stable
+release to the server's `plugins/` directory and restart. Native Paper only; no resource pack,
+database or companion plugin is required.
 
-### Issue Templates 📋
-* Bug report template
-* Feature request template
+| Command | Purpose |
+| --- | --- |
+| `/smp stats [player or UUID]` | Strength, specialty and kill/death statistics |
+| `/smp rules` | Inspect current restrictions |
+| `/smp withdraw [amount]` | Withdraw levels while keeping at least 1 |
+| `/smp ability` | Activate your held specialty's ultimate |
+| `/smp admin menu` | Inventory dashboard and player test controls |
+| `/smp admin set <player> strength <value>` | Save an online/offline account edit |
+| `/smp admin weapon <player> <specialty>` | Assign a specialty for testing |
+| `/smp admin immunity <on\|off>` | Persist the automatic immunity switch |
+| `/smp admin reload` | Validate edited config and activate it |
+| `/smp admin pause` / `resume` | Temporarily pause PvP and progression |
+| `/smp admin test help` | Playtest tags, items, abilities, damage, XP, potions and progression |
 
-### Gradle Builds 🏗
-* Shadowed plugin dependencies
-* [Checkstyle](https://checkstyle.org/) Google standard style check
-* [SpotBugs](https://spotbugs.github.io/) code analysis
+`/epicsmp` aliases `/smp`. `epicsmp.use` defaults true. `epicsmp.admin` defaults op and includes
+`epicsmp.admin.test`. `epicsmp.bypass` defaults **false even for operators**; it bypasses equipment,
+season and cooldown restrictions, but never progression persistence, immunity or a PvP pause.
 
-### Testing 🧪
-* [JUnit 5](https://junit.org/) unit tests
-* [Mockito](https://site.mockito.org/) for mocking dependencies in unit tests
-* Integration tests against real [cw-commons](https://github.com/CrimsonWarpedcraft/cw-commons)
+## Documentation and verification
 
-### Example Plugin Code 🔌
-* `/example` command via [CommandAPI](https://commandapi.jorel.dev) demonstrating subcommands, tab completion, and permissions
-* Example config loading and validation via [cw-commons](https://github.com/CrimsonWarpedcraft/cw-commons)' `BukkitConfigManagerBuilder`, backed by [Jackson](https://github.com/fasterxml/jackson) and [Hibernate Validator](https://hibernate.org/validator/)
-* Example persistent per-player data storage via cw-commons' `BukkitDataStoreBuilder`/`Repository`/`PlayerDataManager`, demonstrated by `/example creepersKilled`: `CreeperKillListener` writes to it on each creeper kill, `CreepersKilled` reads it back
+- [Research and design](docs/design.md)
+- [Server owner's guide and recipes](docs/usage.md)
+- [Development](docs/customization.md)
+- [Build and release](docs/releases.md)
 
-### Config Files 📁
-* Sample plugin.yml with autofill name, version, and main class.
-* Example config.yml
-* Gradle build config
-* Simple .gitignore for common Gradle files
+`build` runs unit tests, Checkstyle and SpotBugs. `integrationTest` uses Paper 26.2 MockBukkit and
+real YAML persistence. Verify native movement, shield timing and combat alongside your other plugins
+on a real Paper server before opening a season. Windows agent builds use the bounded procedure in
+[run-plugin](.agents/skills/run-plugin/SKILL.md).
 
-## Usage
-In order to use this template for yourself, there are a few things that you will need to keep in mind.
-
-- [Extending the example code](docs/usage.md) — add commands, subcommands, config fields, or persistent per-player data
-- [Customizing this template](docs/customization.md) — the one-time checklist for forking this repo (placeholders, secrets, etc.)
-- [Releases & versioning](docs/releases.md) — PaperMC compatibility, version format, and how to cut a release
-- [Agent instructions & skills](docs/skills.md) — agent guidance, Claude Code support, and available skills
-
-## Building locally
-Thanks to [Gradle](https://gradle.org/), building locally is easy no matter what platform you're on. Simply run the following command:
-
-```text
-./gradlew build
-```
-
-This build step will also run all checks and tests, making sure your code is clean.
-
-Run `./gradlew test` for isolated unit tests or `./gradlew integrationTest` for tests that use
-real cw-commons configuration and storage implementations. Integration-test files are created in
-JUnit temporary directories and removed automatically.
-
-JARs can be found in `build/libs/`.
-
-## Contributing
-See [CONTRIBUTING.md](CONTRIBUTING.md).
+Derived from the repository's GPL-3.0 template. Preserve the existing LICENSE and attribution.

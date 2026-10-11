@@ -1,65 +1,31 @@
-# Customizing This Template
+# Development and customization
 
-Use this checklist when turning the template into a plugin.
+The project is now EpicSmpPlugin, targeting only Paper 26.2 with Java 25. Its entry point is
+`com.epicsmp.EpicSmpPlugin`; `rootProject.name` matches the entry point class because `plugin.yml`
+uses resource substitutions. Native Paper `BasicCommand` registers `/smp` and `/epicsmp`; do not
+also declare them in `plugin.yml`.
 
-## Plugin identity
+`Settings` validates a snapshot, `Progression` handles domain transactions, and `YamlStateStore`
+commits immutable `State`/`Profile` snapshots. `CombatTracker` tracks transient tags/cooldowns.
+`GameplayListener` handles attribution, privacy and potion caps; `RuleListener` enforces items and escapes.
+`LimitListener` enforces Lunge/mace cooldowns, inventory use limits, dimension gates and explosion
+caps. Potion level caps preserve duration in one `GameplayListener` path.
+`SmpItems` controls token-backed recipes and protects custom items; `WeaponAbilities` owns
+specialty effects and modifier cleanup. Season-inspired restrictions live in the ordinary rule system.
+`AdminTestCommands` exposes permission-checked playtest operations; saved progression mutations
+still use `Progression` transactions. Event probes exercise rules without simulating native physics.
+`AdminDashboard` delegates test buttons to those same commands. Its holders bind viewer, player
+selections and roster pagination; clicks cannot transfer items and recheck permissions after
+deferral. Configuration edits validate before atomic replacement and use the regular reload path.
+The entry point applies transient attribute modifiers, fails closed on runtime storage errors, and owns
+lifecycle cleanup. The plugin has no third-party runtime dependencies. Shadow produces the single
+release JAR. Paper API, MockBukkit, Mockito, and static-analysis libraries are build/test only.
 
-1. Set `rootProject.name` in `settings.gradle.kts` to the Java entry point class name.
-2. Rename `ExamplePlugin.java`, the `ExamplePlugin` class, and all references to it. The current
-   `plugin.yml` build substitution requires this name to match `rootProject.name`.
-3. Set `group` in `build.gradle.kts` to the Java package.
-4. Rename the main and test package directories, declarations, and imports from
-   `com.crimsonwarpedcraft.exampleplugin`.
+New gameplay rules should have configurable defaults, bounded validation, and meaningful behavioral
+tests. Keep numerical balance separate from event handling. Never mutate profiles before
+persistence succeeds. Custom-item tokens must redeem only once and preserve craft provenance.
+Changes to saved fields require deliberate schema migration; invalid state must not reset silently.
 
-## Example code
-
-Replace or remove the example command, permission, config, data store, listener, and tests. Keep
-these parts in sync:
-
-- Command names and permission checks in Java
-- Permission declarations in `src/main/resources/plugin.yml`
-- Fields in `PluginConfig` and `src/main/resources/config.yml`
-- Main and test code
-
-CommandAPI registers commands in Java. Do not add matching entries under `commands:` in
-`plugin.yml`.
-
-## Metadata and build
-
-- Update `author`, `description`, `permissions`, and `api-version` in `plugin.yml`.
-- Keep the Paper API version, Java toolchain, CI Java versions, and documented server support in
-  sync.
-- Review repositories, dependencies, Shadow relocations, and `minimize` exclusions. Remove
-  example dependencies the plugin no longer uses.
-
-## Project files
-
-- Rewrite `README.md` for the plugin. Replace the build badge, Discord link, commands, features,
-  and repository links.
-- Update `docs/usage.md`, `docs/releases.md`, `AGENTS.md`, and canonical skills under
-  `.agents/skills/` when their examples or architecture change.
-- Do not edit `CLAUDE.md` or `.claude/skills/`. They are generated mirrors.
-- Check source attribution and license terms before changing copyright notices.
-
-## GitHub
-
-- Update `.github/CODEOWNERS` and update or delete `.github/FUNDING.yml`.
-- Replace the enforcement contact in `CODE_OF_CONDUCT.md`.
-- Review issue templates, labels, the stale policy, Dependabot, branch protection, and workflows.
-- Update each `main` reference if the repository uses a different default branch.
-
-Discord notifications use:
-
-- Repository variable `DISCORD_WEBHOOK_ID`
-- Actions secret `DISCORD_WEBHOOK_TOKEN`
-- Optional repository variable `DISCORD_RELEASE_WEBHOOK_ID`
-- Optional Actions secret `DISCORD_RELEASE_WEBHOOK_TOKEN`
-
-Remove the notification jobs if the plugin will not use Discord webhooks.
-
-## Verify
-
-1. Search for old names, packages, permissions, placeholders, attribution, and repository URLs.
-2. Run `./gradlew clean build`.
-3. Check the processed `plugin.yml` and shaded JAR for the correct main class.
-4. Start the JAR on the oldest supported Paper version.
+Keep README, usage/design/release docs, canonical `.agents/skills/`, AGENTS.md and Java/CI versions
+in sync. Preserve LICENSE and original template attribution. Do not edit generated CLAUDE.md or
+`.claude/skills/`. Local and CI builds must pass unit/integration tests, Checkstyle and SpotBugs.
