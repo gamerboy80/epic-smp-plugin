@@ -81,7 +81,7 @@ public final class AdminTestCommands {
               default -> throw new IllegalArgumentException("Choose strength, crafted or reroll");
             };
         require(player.getInventory().firstEmpty() >= 0, "Free an inventory slot first");
-        java.util.UUID token = plugin.progression().issue(player.getUniqueId(), kind);
+        ItemToken.Kind token = kind;
         player
             .getInventory()
             .setItem(player.getInventory().firstEmpty(), plugin.items().item(token));
@@ -164,7 +164,7 @@ public final class AdminTestCommands {
                 + " modes/worlds");
         Progression.DeathResult result =
             plugin.progression().death(victim.getUniqueId(), player.getUniqueId(), now);
-        for (java.util.UUID token : result.drops()) {
+        for (ItemToken.Kind token : result.drops()) {
           victim.getWorld().dropItemNaturally(victim.getLocation(), plugin.items().item(token));
         }
         plugin.abilities().clear(victim);

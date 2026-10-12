@@ -31,7 +31,7 @@ public final class YamlStateStore implements StateStore {
     try {
       yaml.loadFromString(Files.readString(path, StandardCharsets.UTF_8));
       int schema = yaml.getInt("schema", -1);
-      if (schema < 1 || schema > 3) {
+      if (schema < 1 || schema > 4) {
         throw new IOException("Unsupported state schema in " + path);
       }
       Map<UUID, Profile> players = new HashMap<>();
@@ -52,8 +52,8 @@ public final class YamlStateStore implements StateStore {
             new Profile(
                 name,
                 requiredInt(yaml, prefix + "strength", -10, 10),
-                schema == 3 ? requiredInt(yaml, prefix + "crafted-strength", 0, 9) : 0,
-                schema == 3
+                schema >= 3 ? requiredInt(yaml, prefix + "crafted-strength", 0, 9) : 0,
+                schema >= 3
                     ? WeaponKind.valueOf(yaml.getString(prefix + "weapon", ""))
                     : WeaponKind.randomExcept(null),
                 requiredInt(yaml, prefix + "kills", 0, Integer.MAX_VALUE),
@@ -112,7 +112,7 @@ public final class YamlStateStore implements StateStore {
   @Override
   public void save(State state) throws IOException {
     YamlConfiguration yaml = new YamlConfiguration();
-    yaml.set("schema", 3);
+    yaml.set("schema", 4);
     yaml.createSection("players");
     yaml.createSection("pairs");
     yaml.createSection("bottles");

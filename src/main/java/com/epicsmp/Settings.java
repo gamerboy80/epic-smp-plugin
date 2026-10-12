@@ -16,6 +16,64 @@ import org.bukkit.potion.PotionEffectType;
 
 /** Validated configuration snapshot; reload cannot mutate the active rules accidentally. */
 public final class Settings {
+  static final List<String> VANISH_INTERACTION_GUARDS =
+      List.of(
+          "prevent-attacking",
+          "prevent-block-breaking",
+          "prevent-block-placing",
+          "prevent-world-interactions",
+          "prevent-entity-interactions",
+          "prevent-item-drop",
+          "prevent-projectiles",
+          "prevent-buckets",
+          "prevent-item-consumption",
+          "prevent-mounting",
+          "prevent-bed-use",
+          "prevent-inventory-access",
+          "prevent-physical-triggers",
+          "prevent-vibrations",
+          "prevent-raids",
+          "prevent-xp-pickup",
+          "prevent-gliding");
+
+  static final Map<String, Boolean> VANISH_OPTIONS =
+      Map.ofEntries(
+          Map.entry("prevent-combat-entry", true),
+          Map.entry("grant-flight", true),
+          Map.entry("client-night-vision", true),
+          Map.entry("action-bar", true),
+          Map.entry("fake-join-quit", true),
+          Map.entry("prevent-incoming-damage", true),
+          Map.entry("prevent-hunger", true),
+          Map.entry("prevent-xp-pickup", true),
+          Map.entry("prevent-mob-targeting", true),
+          Map.entry("prevent-mob-looking", true),
+          Map.entry("prevent-collision", true),
+          Map.entry("prevent-spawning", true),
+          Map.entry("ignore-sleep", true),
+          Map.entry("prevent-gliding", true),
+          Map.entry("prevent-physical-triggers", true),
+          Map.entry("prevent-vibrations", true),
+          Map.entry("prevent-raids", true),
+          Map.entry("silent-entities", true),
+          Map.entry("silent-block-actions", true),
+          Map.entry("silent-container-inspection", true),
+          Map.entry("retain-death-inventory", true),
+          Map.entry("suspend-progression", true),
+          Map.entry("default-item-pickup", false),
+          Map.entry("default-chat-public", false),
+          Map.entry("prevent-attacking", false),
+          Map.entry("prevent-block-breaking", false),
+          Map.entry("prevent-block-placing", false),
+          Map.entry("prevent-world-interactions", false),
+          Map.entry("prevent-entity-interactions", false),
+          Map.entry("prevent-item-drop", false),
+          Map.entry("prevent-projectiles", false),
+          Map.entry("prevent-buckets", false),
+          Map.entry("prevent-item-consumption", false),
+          Map.entry("prevent-mounting", false),
+          Map.entry("prevent-bed-use", false),
+          Map.entry("prevent-inventory-access", false));
   private final YamlConfiguration values;
   private final Map<Material, Integer> cooldowns;
   private final Set<NamespacedKey> disabledEnchants;
@@ -40,6 +98,20 @@ public final class Settings {
     values.set("ranks", null);
     values.set("strength.deathban", null);
     values.set("rules.season-four", null);
+    if (!values.isSet("vanish.default-chat-public")) {
+      values.set("vanish.default-chat-public", !values.getBoolean("vanish.private-chat", true));
+    }
+    values.set("vanish.private-chat", null);
+    VANISH_OPTIONS.forEach(
+        (option, fallback) -> {
+          String path = "vanish." + option;
+          if (!values.isSet(path)) {
+            values.set(path, fallback);
+          }
+          if (!values.isBoolean(path)) {
+            throw new IllegalArgumentException(path + " must be a boolean");
+          }
+        });
     for (String path :
         List.of(
             "rules.allow-ender-pearls",

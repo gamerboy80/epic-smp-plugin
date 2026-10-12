@@ -5,7 +5,6 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
-import java.util.Set;
 import java.util.UUID;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
@@ -25,12 +24,10 @@ import org.bukkit.event.enchantment.EnchantItemEvent;
 import org.bukkit.event.entity.EntityPickupItemEvent;
 import org.bukkit.event.entity.ItemMergeEvent;
 import org.bukkit.event.inventory.BrewEvent;
-import org.bukkit.event.inventory.ClickType;
 import org.bukkit.event.inventory.CraftItemEvent;
 import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.inventory.InventoryDragEvent;
 import org.bukkit.event.inventory.InventoryMoveItemEvent;
-import org.bukkit.event.inventory.InventoryType;
 import org.bukkit.event.inventory.PrepareAnvilEvent;
 import org.bukkit.event.inventory.PrepareItemCraftEvent;
 import org.bukkit.event.inventory.PrepareSmithingEvent;
@@ -42,11 +39,12 @@ import org.bukkit.inventory.ShapedRecipe;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.persistence.PersistentDataType;
 
-/** Authenticated Strength items and rerolls with immutable presentation and safe crafting. */
+/** Tagged Strength items and rerolls with native inventory behavior and protected presentation. */
 public final class SmpItems implements Listener {
   private final EpicSmpPlugin plugin;
   private final NamespacedKey tokenKey;
   private final NamespacedKey kindKey;
+  private final NamespacedKey formatKey;
   private final NamespacedKey strengthRecipe;
   private final NamespacedKey rerollRecipe;
   private final NamespacedKey appleRecipe;
@@ -56,6 +54,7 @@ public final class SmpItems implements Listener {
     this.plugin = plugin;
     tokenKey = new NamespacedKey(plugin, "strength_bottle");
     kindKey = new NamespacedKey(plugin, "item_kind");
+    formatKey = new NamespacedKey(plugin, "item_format");
     strengthRecipe = new NamespacedKey(plugin, "strength_item");
     rerollRecipe = new NamespacedKey(plugin, "weapon_reroll");
     appleRecipe = new NamespacedKey(plugin, "golden_apple");
@@ -63,9 +62,7 @@ public final class SmpItems implements Listener {
         .runTaskTimer(plugin, () -> Bukkit.getOnlinePlayers().forEach(this::scan), 1L, 20L);
   }
 
-  /**
-   * Registers the Season Four recipes with preview outputs; each actual item gets its own token.
-   */
+  /** Registers tagged outputs for native Season Four crafting. */
   public void recipes() {
     clearRecipes();
     if (plugin.settings().flag("recipes.strength")) {
@@ -115,13 +112,9 @@ public final class SmpItems implements Listener {
         new ItemStack(kind == ItemToken.Kind.REROLL ? Material.BOOK : Material.GHAST_TEAR), kind);
   }
 
-  /** Builds an authentic issued item from its durable provenance. */
-  public ItemStack item(UUID token) {
-    ItemToken issued = plugin.progression().snapshot().bottles().get(token);
-    if (issued == null) {
-      throw new IllegalArgumentException("Unknown custom-item token");
-    }
-    return decorate(preview(issued.kind()), issued.kind(), List.of(token));
+  /** Creates an identical tagged item, ready for native stacking and movement. */
+  public ItemStack item(ItemToken.Kind kind) {
+    return preview(Objects.requireNonNull(kind));
   }
 
   private ItemStack decorate(ItemStack item, ItemToken.Kind kind) {
@@ -153,6 +146,7 @@ public final class SmpItems implements Listener {
             Component.text(help, NamedTextColor.WHITE).decoration(TextDecoration.ITALIC, false)));
     meta.getPersistentDataContainer().set(kindKey, PersistentDataType.STRING, kind.name());
     if (tokens.isEmpty()) {
+      meta.getPersistentDataContainer().set(formatKey, PersistentDataType.INTEGER, 1);
       meta.getPersistentDataContainer().remove(tokenKey);
     } else {
       meta.getPersistentDataContainer()
@@ -195,29 +189,31 @@ public final class SmpItems implements Listener {
     }
   }
 
-  private boolean stackable(ItemToken.Kind kind) {
-    return kind == ItemToken.Kind.STRENGTH || kind == ItemToken.Kind.CRAFTED_STRENGTH;
+  private boolean legacy(ItemStack item) {
+    return item != null && item.getPersistentDataContainer().has(tokenKey);
   }
 
   private boolean authentic(ItemStack item) {
-    if (item == null || item.getType().isAir()) {
-      return false;
-    }
     ItemToken.Kind kind = kind(item);
-    List<UUID> tokens = tokens(item);
-    if (kind == null
-        || tokens.size() != item.getAmount()
-        || kind == ItemToken.Kind.REROLL && item.getAmount() != 1
-        || new HashSet<>(tokens).size() != tokens.size()) {
-      return false;
-    }
-    for (UUID token : tokens) {
-      ItemToken issued = plugin.progression().snapshot().bottles().get(token);
-      if (issued == null || issued.kind() != kind) {
-        return false;
-      }
-    }
-    return true;
+    return kind != null
+        && !legacy(item)
+        && Integer.valueOf(1)
+            .equals(item.getPersistentDataContainer().get(formatKey, PersistentDataType.INTEGER))
+        && item.getType() == (kind == ItemToken.Kind.REROLL ? Material.BOOK : Material.GHAST_TEAR);
+  }
+
+  private boolean authenticLegacy(ItemStack item) {
+    ItemToken.Kind kind = kind(item);
+    List<UUID> ids = tokens(item);
+    return kind != null
+        && ids.size() == item.getAmount()
+        && new HashSet<>(ids).size() == ids.size()
+        && ids.stream()
+            .allMatch(
+                id -> {
+                  ItemToken token = plugin.progression().snapshot().bottles().get(id);
+                  return token != null && token.kind() == kind;
+                });
   }
 
   private ItemStack bundle(ItemStack template, ItemToken.Kind kind, List<UUID> tokens) {
@@ -229,221 +225,146 @@ public final class SmpItems implements Listener {
     return decorate(result, kind, tokens);
   }
 
-  private ItemStack insert(Player player, ItemStack source) {
-    ItemToken.Kind kind = kind(source);
-    if (!stackable(kind) || !authentic(source)) {
+  private ItemStack normalize(ItemStack source) throws IOException {
+    if (!custom(source)) {
       return source;
     }
-    List<UUID> remaining = new ArrayList<>(tokens(source));
-    ItemStack[] storage = Objects.requireNonNull(player.getInventory().getStorageContents());
-    for (int slot = 0; slot < storage.length && !remaining.isEmpty(); slot++) {
-      ItemStack current = storage[slot];
-      if (current == null
-          || current.getType().isAir()
-          || kind(current) != kind
-          || !authentic(current)) {
-        continue;
+    if (legacy(source)) {
+      if (!authenticLegacy(source)) {
+        return source;
       }
-      List<UUID> currentTokens = tokens(current);
-      Set<UUID> alreadyPresent = new HashSet<>(currentTokens);
-      List<UUID> mergeable =
-          remaining.stream().filter(token -> !alreadyPresent.contains(token)).toList();
-      int amount =
-          Math.min(current.getMaxStackSize() - current.getAmount(), mergeable.size());
-      if (amount <= 0) {
-        continue;
-      }
-      List<UUID> moved = new ArrayList<>(mergeable.subList(0, amount));
-      List<UUID> combined = new ArrayList<>(currentTokens);
-      combined.addAll(moved);
-      ItemStack merged = bundle(current, kind, combined);
-      player.getInventory().setItem(slot, merged);
-      storage[slot] = merged;
-      remaining.removeAll(moved);
+      plugin.progression().migrateItems(tokens(source), kind(source));
+    } else if (!authentic(source)) {
+      return source;
     }
-    for (int slot = 0; slot < storage.length && !remaining.isEmpty(); slot++) {
-      ItemStack current = storage[slot];
-      if (current != null && !current.getType().isAir()) {
-        continue;
-      }
-      int amount = Math.min(source.getMaxStackSize(), remaining.size());
-      List<UUID> placed = new ArrayList<>(remaining.subList(0, amount));
-      ItemStack stored = bundle(source, kind, placed);
-      player.getInventory().setItem(slot, stored);
-      storage[slot] = stored;
-      remaining.subList(0, amount).clear();
-    }
-    return remaining.isEmpty() ? null : bundle(source, kind, remaining);
+    ItemStack result = item(kind(source));
+    result.setAmount(source.getAmount());
+    return result.equals(source) ? source : result;
   }
 
-  private boolean hasStorageSpace(Player player, int amount) {
-    int space = 0;
-    ItemStack[] storage = Objects.requireNonNull(player.getInventory().getStorageContents());
-    for (ItemStack item : storage) {
-      if (item == null || item.getType().isAir()) {
-        space += Material.GHAST_TEAR.getMaxStackSize();
-      } else if (stackable(kind(item)) && authentic(item)) {
-        space += Math.max(0, item.getMaxStackSize() - item.getAmount());
+  private void normalizeInventory(org.bukkit.inventory.Inventory inventory) throws IOException {
+    ItemStack[] contents = Objects.requireNonNull(inventory.getContents());
+    for (int slot = 0; slot < contents.length; slot++) {
+      ItemStack normalized = normalize(contents[slot]);
+      if (normalized != contents[slot]) {
+        inventory.setItem(slot, normalized);
       }
-      if (space >= amount) {
-        return true;
-      }
-    }
-    return false;
-  }
-
-  /** Merges independent issued Strength items when they are picked up. */
-  @EventHandler(ignoreCancelled = true, priority = EventPriority.HIGHEST)
-  public void pickup(EntityPickupItemEvent event) {
-    if (!(event.getEntity() instanceof Player player)) {
-      return;
-    }
-    ItemStack source = event.getItem().getItemStack();
-    ItemToken.Kind kind = kind(source);
-    if (!stackable(kind)) {
-      return;
-    }
-    event.setCancelled(true);
-    if (!authentic(source)) {
-      return;
-    }
-    ItemStack remainder = insert(player, source);
-    if (remainder == null) {
-      event.getItem().remove();
-    } else {
-      event.getItem().setItemStack(remainder);
-      event.getItem().setPickupDelay(1);
     }
   }
 
-  /** Keeps token IDs aligned with stacks split or combined through inventory clicks. */
-  @EventHandler(ignoreCancelled = true, priority = EventPriority.HIGHEST)
+  private boolean physical(org.bukkit.inventory.Inventory inventory, Player player) {
+    return inventory != null
+        && (inventory.equals(player.getInventory())
+            || inventory.equals(player.getEnderChest())
+            || inventory.getLocation() != null);
+  }
+
+  /** Converts existing bundles before native clicks; tagged items need no click handling. */
+  @EventHandler(ignoreCancelled = true, priority = EventPriority.LOWEST)
   public void stackClick(InventoryClickEvent event) {
-    if (!(event.getWhoClicked() instanceof Player player)) {
+    if (event instanceof CraftItemEvent
+        || !legacy(event.getCurrentItem()) && !legacy(event.getCursor())) {
       return;
     }
-    ItemStack cursor = event.getCursor();
-    ItemStack current = event.getCurrentItem();
-    boolean customCursor = stackable(kind(cursor));
-    boolean customCurrent = stackable(kind(current));
-    if (!customCursor && !customCurrent) {
+    if (!(event.getWhoClicked() instanceof Player player)
+        || !physical(event.getClickedInventory(), player) && event.getClickedInventory() != null) {
       return;
     }
-    if (event.getClick() == ClickType.MIDDLE || event.getClick() == ClickType.DOUBLE_CLICK) {
-      event.setCancelled(true);
-      return;
-    }
-    if (event.isShiftClick() && customCurrent) {
-      event.setCancelled(true);
-      if (authentic(current)) {
-        if (event.getClickedInventory() == player.getInventory()) {
-          if (event.getView().getTopInventory().getType() != InventoryType.CRAFTING) {
-            event.setCurrentItem(
-                insertIntoEmpty(event.getView().getTopInventory(), current.clone()));
-          }
-        } else {
-          event.setCurrentItem(insert(player, current.clone()));
-        }
+    try {
+      ItemStack current = event.getCurrentItem();
+      ItemStack cursor = event.getCursor();
+      ItemStack nextCurrent = normalize(current);
+      if (nextCurrent != current) {
+        event.setCurrentItem(nextCurrent);
       }
-      return;
-    }
-    if (customCursor
-        && authentic(cursor)
-        && event.getClickedInventory() == null
-        && (event.isLeftClick() || event.isRightClick())) {
-      event.setCancelled(true);
-      int dropped = event.isRightClick() ? 1 : cursor.getAmount();
-      List<UUID> cursorTokens = tokens(cursor);
-      List<UUID> droppedTokens = new ArrayList<>(cursorTokens.subList(0, dropped));
-      player
-          .getWorld()
-          .dropItemNaturally(player.getLocation(), bundle(cursor, kind(cursor), droppedTokens));
-      List<UUID> remaining = new ArrayList<>(cursorTokens.subList(dropped, cursorTokens.size()));
-      event.setCursor(bundle(cursor, kind(cursor), remaining));
-      return;
-    }
-    if (customCursor && authentic(cursor) && isEmpty(current)) {
-      if (!event.isLeftClick() && !event.isRightClick()) {
-        return;
+      ItemStack nextCursor = normalize(cursor);
+      if (nextCursor != cursor) {
+        event.setCursor(nextCursor);
       }
+    } catch (IOException e) {
       event.setCancelled(true);
-      int moved = event.isRightClick() ? 1 : cursor.getAmount();
-      List<UUID> cursorTokens = tokens(cursor);
-      List<UUID> placedTokens = new ArrayList<>(cursorTokens.subList(0, moved));
-      event.setCurrentItem(bundle(cursor, kind(cursor), placedTokens));
-      List<UUID> remaining = new ArrayList<>(cursorTokens.subList(moved, cursorTokens.size()));
-      event.setCursor(bundle(cursor, kind(cursor), remaining));
-      return;
-    }
-    if (customCursor
-        && customCurrent
-        && authentic(cursor)
-        && authentic(current)
-        && kind(cursor) == kind(current)
-        && (event.isLeftClick() || event.isRightClick())) {
-      event.setCancelled(true);
-      int capacity = current.getMaxStackSize() - current.getAmount();
-      int moved = Math.min(event.isRightClick() ? 1 : cursor.getAmount(), capacity);
-      if (moved < 1) {
-        return;
-      }
-      Set<UUID> combinedIds = new HashSet<>(tokens(current));
-      if (tokens(cursor).stream().anyMatch(combinedIds::contains)) {
-        return;
-      }
-      List<UUID> combined = new ArrayList<>(tokens(current));
-      combined.addAll(tokens(cursor).subList(0, moved));
-      event.setCurrentItem(bundle(current, kind(current), combined));
-      List<UUID> remaining = new ArrayList<>(tokens(cursor).subList(moved, cursor.getAmount()));
-      event.setCursor(bundle(cursor, kind(cursor), remaining));
-      return;
-    }
-    if (!customCursor
-        && customCurrent
-        && authentic(current)
-        && isEmpty(cursor)
-        && event.isRightClick()) {
-      event.setCancelled(true);
-      List<UUID> currentTokens = tokens(current);
-      int moved = (currentTokens.size() + 1) / 2;
-      List<UUID> cursorTokens = new ArrayList<>(currentTokens.subList(0, moved));
-      List<UUID> remaining = new ArrayList<>(currentTokens.subList(moved, currentTokens.size()));
-      event.setCurrentItem(bundle(current, kind(current), remaining));
-      event.setCursor(bundle(current, kind(current), cursorTokens));
+      plugin.storageFailure(e);
     }
   }
 
-  /** Prevents drag-splitting from copying the same token IDs into several stacks. */
-  @EventHandler(ignoreCancelled = true, priority = EventPriority.HIGHEST)
+  /** A legacy drag is retried after conversion; ordinary tagged drags remain native. */
+  @EventHandler(ignoreCancelled = true, priority = EventPriority.LOWEST)
   public void stackDrag(InventoryDragEvent event) {
-    if (stackable(kind(event.getOldCursor()))) {
+    if (legacy(event.getOldCursor())) {
       event.setCancelled(true);
+      if (event.getWhoClicked() instanceof Player player) {
+        scan(player);
+      }
     }
   }
 
-  /** Keeps hoppers from splitting authenticated bundles or merging duplicate token stacks. */
-  @EventHandler(ignoreCancelled = true, priority = EventPriority.HIGHEST)
+  /** Migrates real containers, leaving read-only inventory snapshots untouched. */
+  @EventHandler(ignoreCancelled = true, priority = EventPriority.LOWEST)
+  public void open(org.bukkit.event.inventory.InventoryOpenEvent event) {
+    if (event.getPlayer() instanceof Player player && physical(event.getInventory(), player)) {
+      try {
+        normalizeInventory(event.getInventory());
+        scan(player);
+      } catch (IOException e) {
+        event.setCancelled(true);
+        plugin.storageFailure(e);
+      }
+    }
+  }
+
+  /** Converts the ground stack without taking over acquisition or its cancellation. */
+  @EventHandler(ignoreCancelled = true, priority = EventPriority.LOWEST)
+  public void pickup(EntityPickupItemEvent event) {
+    migrateGround(event.getItem(), event);
+  }
+
+  /** Converts legacy ground bundles when a hopper attempts to collect them. */
+  @EventHandler(ignoreCancelled = true, priority = EventPriority.LOWEST)
+  public void hopperPickup(org.bukkit.event.inventory.InventoryPickupItemEvent event) {
+    migrateGround(event.getItem(), event);
+  }
+
+  private void migrateGround(org.bukkit.entity.Item ground, org.bukkit.event.Cancellable event) {
+    if (!legacy(ground.getItemStack())) {
+      return;
+    }
+    try {
+      ground.setItemStack(normalize(ground.getItemStack()));
+    } catch (IOException e) {
+      event.setCancelled(true);
+      plugin.storageFailure(e);
+    }
+  }
+
+  /** Retries legacy hopper transfers after converting their complete source stacks. */
+  @EventHandler(ignoreCancelled = true, priority = EventPriority.LOWEST)
   public void hopperMove(InventoryMoveItemEvent event) {
-    if (custom(event.getItem())) {
+    if (legacy(event.getItem())) {
       event.setCancelled(true);
+      try {
+        normalizeInventory(event.getSource());
+      } catch (IOException e) {
+        plugin.storageFailure(e);
+      }
     }
   }
 
-  /** Stops cloned token bundles from combining into stacks with mismatched token counts. */
-  @EventHandler(ignoreCancelled = true, priority = EventPriority.HIGHEST)
+  /** Keeps legacy IDs safe until conversion; normal ground merges remain native. */
+  @EventHandler(ignoreCancelled = true, priority = EventPriority.LOWEST)
   public void merge(ItemMergeEvent event) {
-    if (stackable(kind(event.getEntity().getItemStack()))
-        || stackable(kind(event.getTarget().getItemStack()))) {
+    if (legacy(event.getEntity().getItemStack()) || legacy(event.getTarget().getItemStack())) {
       event.setCancelled(true);
+      migrateGround(event.getEntity(), event);
+      migrateGround(event.getTarget(), event);
     }
   }
 
-  /** Assigns separate token IDs to the dropped portion and remaining inventory stack. */
+  /** Keeps existing legacy bundles valid when dropped before their first conversion. */
   @EventHandler(ignoreCancelled = true, priority = EventPriority.HIGHEST)
   public void drop(PlayerDropItemEvent event) {
     ItemStack dropped = event.getItemDrop().getItemStack();
     ItemToken.Kind kind = kind(dropped);
-    if (!stackable(kind)) {
+    if (!legacy(dropped)) {
       return;
     }
     List<UUID> allTokens = tokens(dropped);
@@ -485,35 +406,71 @@ public final class SmpItems implements Listener {
     return item == null || item.getType().isAir();
   }
 
-  private ItemStack insertIntoEmpty(org.bukkit.inventory.Inventory inventory, ItemStack source) {
-    for (int slot = 0; slot < inventory.getSize(); slot++) {
-      if (isEmpty(inventory.getItem(slot))) {
-        inventory.setItem(slot, source);
-        return null;
+  private void scan(Player player) {
+    try {
+      normalizeInventory(player.getInventory());
+      ItemStack cursor = player.getItemOnCursor();
+      ItemStack normalized = normalize(cursor);
+      if (normalized != cursor) {
+        player.setItemOnCursor(normalized);
       }
+    } catch (IOException e) {
+      plugin.storageFailure(e);
     }
-    return source;
   }
 
-  private void scan(Player player) {
-    ItemStack[] contents = player.getInventory().getContents();
-    if (contents != null) {
-      for (int slot = 0; slot < contents.length; slot++) {
-        ItemStack item = contents[slot];
-        if (custom(item)) {
-          ItemToken.Kind kind = kind(Objects.requireNonNull(item));
-          if (authentic(item)) {
-            player.getInventory().setItem(slot, decorate(item, kind, tokens(item)));
+  private List<ItemStack> withdrawalItems(Profile profile, int amount) {
+    List<ItemStack> items = new ArrayList<>();
+    for (int index = 0; index < amount; index++) {
+      items.add(
+          item(
+              index < profile.craftedStrength()
+                  ? ItemToken.Kind.CRAFTED_STRENGTH
+                  : ItemToken.Kind.STRENGTH));
+    }
+    return items;
+  }
+
+  private ItemStack[] withdrawalStorage(Player player, List<ItemStack> items) {
+    ItemStack[] storage = Objects.requireNonNull(player.getInventory().getStorageContents());
+    for (int slot = 0; slot < storage.length; slot++) {
+      if (storage[slot] != null) {
+        storage[slot] = storage[slot].clone();
+      }
+    }
+    for (ItemStack item : items) {
+      boolean fits = false;
+      for (ItemStack existing : storage) {
+        if (!isEmpty(existing)
+            && existing.isSimilar(item)
+            && existing.getAmount() < existing.getMaxStackSize()) {
+          existing.setAmount(existing.getAmount() + 1);
+          fits = true;
+          break;
+        }
+      }
+      if (!fits) {
+        for (int slot = 0; slot < storage.length; slot++) {
+          if (isEmpty(storage[slot])) {
+            storage[slot] = item.clone();
+            fits = true;
+            break;
           }
         }
       }
+      if (!fits) {
+        return null;
+      }
     }
+    return storage;
   }
 
   private void available(Player player) {
-    if (plugin.paused() || !plugin.active(player) || player.isDead()) {
-      throw new IllegalArgumentException(
-          "Custom items require active play while progression is running");
+    if (plugin.paused()) {
+      throw new IllegalArgumentException("Progression is paused.");
+    }
+    if (player.isDead()) {
+      throw new IllegalArgumentException("Respawn before using Strength items.");
     }
   }
 
@@ -525,16 +482,15 @@ public final class SmpItems implements Listener {
       throw new IllegalArgumentException(
           "Withdraw a positive amount while keeping at least Strength 1");
     }
-    if (!hasStorageSpace(player, amount)) {
+    scan(player);
+    available(player);
+    ItemStack[] storage = withdrawalStorage(player, withdrawalItems(profile, amount));
+    if (storage == null) {
       throw new IllegalArgumentException(
           "Free inventory space for " + amount + " Strength items first");
     }
-    for (UUID token : plugin.progression().withdraw(player.getUniqueId(), amount)) {
-      ItemStack remainder = insert(player, item(token));
-      if (remainder != null) {
-        throw new IllegalStateException("Could not fit withdrawn Strength items");
-      }
-    }
+    plugin.progression().withdraw(player.getUniqueId(), amount);
+    player.getInventory().setStorageContents(storage);
     plugin.refresh(player);
     player.sendMessage(EpicSmpPlugin.message("Withdrew " + amount + " Strength item(s)."));
   }
@@ -556,31 +512,30 @@ public final class SmpItems implements Listener {
     }
     Player player = event.getPlayer();
     ItemStack held = player.getInventory().getItem(hand);
-    if (held == null || !authentic(held) || !tokens(held).equals(tokens(clicked))) {
-      return;
-    }
     try {
       available(player);
-      List<UUID> heldTokens = tokens(held);
-      UUID token = heldTokens.getFirst();
-      ItemToken issued = plugin.progression().snapshot().bottles().get(token);
-      if (issued == null) {
-        throw new IllegalArgumentException("Invalid or already used custom item");
+      ItemStack normalized = normalize(held);
+      if (normalized != held) {
+        player.getInventory().setItem(hand, normalized);
+        held = normalized;
       }
-      if (issued.kind() == ItemToken.Kind.REROLL) {
-        plugin.progression().reroll(player.getUniqueId(), token);
+      if (!authentic(held) || kind(held) != kind(clicked)) {
+        return;
+      }
+      ItemToken.Kind kind = kind(held);
+      if (kind == ItemToken.Kind.REROLL) {
+        plugin.progression().reroll(player.getUniqueId());
         plugin.abilities().clear(player);
         player.sendMessage(
             EpicSmpPlugin.message(
                 "Weapon specialty: "
                     + plugin.progression().profile(player.getUniqueId()).weapon()));
       } else {
-        plugin.progression().redeem(player.getUniqueId(), token);
+        plugin.progression().redeem(player.getUniqueId(), kind);
       }
-      List<UUID> remaining = new ArrayList<>(heldTokens);
-      remaining.removeFirst();
-      player.getInventory().setItem(
-          hand, remaining.isEmpty() ? null : bundle(held, issued.kind(), remaining));
+      ItemStack remaining = held.clone();
+      remaining.setAmount(remaining.getAmount() - 1);
+      player.getInventory().setItem(hand, remaining.getAmount() == 0 ? null : remaining);
       plugin.refresh(player);
     } catch (IllegalArgumentException e) {
       player.sendMessage(EpicSmpPlugin.message(e.getMessage()));
@@ -618,69 +573,28 @@ public final class SmpItems implements Listener {
     }
   }
 
-  /**
-   * Issues one unique item per ordinary craft; bulk/number-key crafts cannot duplicate previews.
-   */
+  /** Native crafting supports bulk and number-key crafts while enforcing gameplay eligibility. */
   @EventHandler(ignoreCancelled = true, priority = EventPriority.HIGHEST)
   public void craft(CraftItemEvent event) {
     if (containsCustom(event.getInventory().getMatrix())) {
       event.setCancelled(true);
       return;
     }
-    ItemToken.Kind kind = recipeKind(event.getRecipe());
-    if (kind == null) {
-      return;
-    }
-    event.setCancelled(true);
-    if (!(event.getWhoClicked() instanceof Player player)) {
-      return;
-    }
-    ItemStack cursor = event.getCursor();
-    boolean emptyCursor = isEmpty(cursor);
-    boolean matchingStrengthStack =
-        kind == ItemToken.Kind.CRAFTED_STRENGTH
-            && authentic(cursor)
-            && kind(cursor) == kind
-            && cursor.getAmount() < cursor.getMaxStackSize();
-    if (event.isShiftClick()
-        || !event.isLeftClick() && !event.isRightClick()
-        || !emptyCursor && !matchingStrengthStack) {
-      player.sendMessage(
-          EpicSmpPlugin.message(
-              "Craft custom items one at a time onto an empty cursor or matching Strength stack."));
-      return;
-    }
-    try {
-      available(player);
-      ItemStack[] matrix = java.util.Objects.requireNonNull(event.getInventory().getMatrix());
-      UUID token = plugin.progression().issue(player.getUniqueId(), kind);
-      for (int slot = 0; slot < matrix.length; slot++) {
-        ItemStack ingredient = matrix[slot];
-        if (ingredient != null && !ingredient.getType().isAir()) {
-          matrix[slot] = ingredient.subtract(1);
-        }
+    if (recipeKind(event.getRecipe()) != null && event.getWhoClicked() instanceof Player player) {
+      try {
+        available(player);
+      } catch (IllegalArgumentException e) {
+        event.setCancelled(true);
+        player.sendMessage(EpicSmpPlugin.message(e.getMessage()));
       }
-      event.getInventory().setMatrix(matrix);
-      if (emptyCursor) {
-        player.setItemOnCursor(item(token));
-      } else {
-        List<UUID> combined = new ArrayList<>(tokens(cursor));
-        combined.add(token);
-        player.setItemOnCursor(bundle(cursor, kind, combined));
-      }
-    } catch (IllegalArgumentException e) {
-      player.sendMessage(EpicSmpPlugin.message(e.getMessage()));
-    } catch (IOException e) {
-      plugin.storageFailure(e);
     }
   }
 
-  /** Automated crafters cannot issue ownerless tokens or consume custom items. */
+  /** Automated crafting preserves the recipe's tag and rejects custom ingredients. */
   @EventHandler(ignoreCancelled = true, priority = EventPriority.HIGHEST)
   public void crafter(CrafterCraftEvent event) {
-    if (recipeKind(event.getRecipe()) != null
-        || event.getBlock().getState() instanceof Crafter crafter
-            && containsCustom(crafter.getInventory().getContents())) {
+    if (event.getBlock().getState() instanceof Crafter crafter
+        && containsCustom(crafter.getInventory().getContents())) {
       event.setCancelled(true);
     }
   }

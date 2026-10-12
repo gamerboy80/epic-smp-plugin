@@ -1,6 +1,6 @@
 # Server owner's guide
 
-Install on Paper 26.2 with Java 25. New players start at Strength 1 with one random specialty.
+Install on Paper 26.2 with Java 25 and the official PacketEvents 2.14.0+ Spigot/Paper server JAR. New players start at Strength 1 with one random specialty.
 UUID profiles persist through death, reconnects and restarts. `/smp stats` shows current state.
 Strength changes appear in chat; repeated modifier refreshes do not resend the same value.
 
@@ -17,25 +17,36 @@ level drops as an authentic Strength item at the death location. PvP killers bel
 Strength directly; capped killers receive the victim's lost levels as physical items there. Both
 reward and penalty are suppressed for the same pair in either direction for 600 seconds by default.
 Combat-tagged environmental deaths can still be credited to the last player when
-`combat.credit-tagged-deaths` is enabled. Crafted levels dropped this way remain Crafted Strength.
+`combat.credit-tagged-deaths` is enabled. Lost crafted levels mature into regular Strength on
+credited player kills, including tagged environmental deaths: killers below the cap gain regular
+levels instantly, and capped killers receive regular Strength items. Uncredited environmental
+deaths keep the Crafted Strength tag, as do withdrawals. Repeat-pair protection also applies to
+this conversion.
 Strength items spawn separately from ordinary inventory drops, including when `keepInventory` is on.
 
 `/smp withdraw [amount]` withdraws one level by default, or the supplied positive amount, while
 keeping at least 1. Free enough inventory capacity first; matching **Strength** items stack, and
-**Crafted Strength** stacks separately. Right-click in an inventory to split a stack; drag-splitting
-and hopper transfers are blocked to preserve each item's single-use token. Right-click a **Strength**
-ghast tear in either hand to redeem one level. It can be traded and stored. A crafted contribution
-withdraws as **Crafted Strength**, which can only be redeemed below level 3. **Weapon Reroll** books
-change
-to a different specialty when right-clicked. Items keep their immutable names, lore and saved IDs;
-renamed ordinary ghast tears are not accepted. Anvils, enchanting, smithing, grinding, brewing
-and ingredient use cannot transform valid custom items. A periodic scan restores their presentation.
+**Crafted Strength** stacks separately. Both use identical plugin kind/format tags. Minecraft handles
+pickup, merging, splitting, shift-clicks, hotbar swaps, double-click collection, dragging, drops and
+hopper transfers. Cancelled pickups leave the item on the ground.
 
-Items have unique persisted IDs and can redeem only once, even after restart. At a cap, during
-pause, or outside active Survival/Adventure play, redemption keeps the item. Failed storage keeps
-active state unchanged and pauses progression. A crash between the state commit and physical
-inventory delivery can lose an item; retain backups for recovery. Never restore players.yml and
-world/player inventories from different points in time: old backups can re-enable old tokens.
+Right-click a **Strength** ghast tear in either hand to redeem one level. It can be traded and stored.
+A crafted contribution withdraws as **Crafted Strength**, which can only be redeemed below level 3.
+**Weapon Reroll** books change to a different specialty when right-clicked. Names and lore are protected;
+renamed ordinary ghast tears are not accepted. Anvils, enchanting, smithing, grinding, brewing and
+ingredient use cannot transform valid custom items. A periodic scan restores their presentation.
+
+Existing registered bundles convert to tagged stacks on pickup, when opening physical inventories,
+or during the player inventory scan. Their registrations retire before conversion, preserving
+quantity and craft provenance. Invalid or already-converted bundles stay unusable. Read-only
+container snapshots do not consume registrations. Back up progression and world/player inventories
+together before upgrading or restoring data.
+
+Item use, crafting and withdrawal support creative mode and vanished staff for testing. Strength
+caps still apply. At a cap, while dead, or during a progression pause, redemption keeps the item.
+Failed storage keeps active state unchanged and pauses progression. Item use saves progression
+before consuming one physical item. A crash between a saved transaction and the inventory change
+can leave the physical item and progression out of sync; retain consistent backups for recovery.
 
 ## Recipes
 
@@ -47,8 +58,8 @@ All three recipes come from the supplied Season Four wiki. Shapes are 3×3, read
 | Weapon Reroll book | Iron block, gold block, iron block | Gold block, diamond block, gold block | Iron block, gold block, iron block |
 | Golden apple | Empty, gold ingot, empty | Gold ingot, apple, gold ingot | Empty, gold ingot, empty |
 
-Toggle them independently under `recipes`. Custom Strength/reroll crafts require an ordinary click
-with an empty cursor and issue one item at a time; shift/number-key/automated crafting is blocked.
+Toggle them independently under `recipes`. Custom Strength/reroll recipes support native bulk
+and number-key crafting and automated crafters; their output tags preserve the item kind.
 The ordinary vanilla golden-apple recipe also remains available. Banned-use items can still be
 stored and consumed as ordinary recipe ingredients.
 
@@ -139,7 +150,7 @@ Reload pending file edits before using a dashboard toggle, since it writes the a
 | `simulatekill <attacker> <victim>` | Saved death progression without physical death; qualifying overflow items drop |
 | `lunge <player> <power>` | Lunge event probe, charging accepted cooldowns without movement |
 | `give <player> <mace\|spear\|apple\|totem\|speed>` | Grant ordinary test equipment/items |
-| `item <player> <strength\|crafted\|reroll>` | Issue an authentic saved custom item |
+| `item <player> <strength\|crafted\|reroll>` | Give a tagged custom item |
 | `ability <player>` | Activate under ordinary requirements and cooldown rules |
 | `xp <player> <amount>` | Real XP through server event rules |
 | `effect <player> <effect> <level> <seconds>` | Real persistent effect through drink/effect caps |
@@ -151,8 +162,8 @@ Native physics, shield interactions, offhand animation and other-plugin compatib
 
 ## Persistence
 
-Schema 3 stores profiles, weapon specialties, crafted contributions, item IDs/provenance and pair
-windows. Earlier schemas migrate while preserving Strength/statistics and clamping to current
+Schema 4 stores profiles, weapon specialties, crafted contributions, pending legacy item
+registrations and pair windows. Earlier schemas migrate while preserving Strength/statistics and clamping to current
 limits. Each mutation saves before publishing active state. Atomic replacement keeps the previous
 commit in `players.yml.bak`. Corrupt snapshots abort startup rather than silently reset accounts.
 Filesystem writes can still be lost on power failure; maintain full consistent external backups.
@@ -160,3 +171,114 @@ Filesystem writes can still be lost on power failure; maintain full consistent e
 `/smp admin pause` temporarily stops PvP/progression and ends ability effects. Pause resets on
 restart; `rules.pvp: false` persists a PvP disable. A runtime storage failure requires disk repair and
 restart before resuming.
+
+
+## Staff vanish
+
+`/vanish` (alias `/v`) toggles your visibility. `/vanish on`, `/vanish off` and `/vanish status`
+set or inspect it. `/vanish <player>` toggles another online staff member; explicit
+`/vanish on|off|toggle|status <player>` forms are also supported. `/vanish help` shows the syntax.
+
+| Permission | Default | Purpose |
+| --- | --- | --- |
+| `epicsmp.vanish` | op | Toggle yourself |
+| `epicsmp.vanish.auto` | false | Auto-vanish once on login for each connection; also permits self-toggling |
+| `epicsmp.vanish.see` | op | See vanished players in-world/in tab and receive private staff notices/chat |
+| `epicsmp.vanish.others` | op | Manage other permitted online staff and list vanished players |
+| `epicsmp.vanish.inspect` | op | Silently inspect containers while vanished |
+
+For LuckPerms, give the automatic join permission with
+`/lp user <name> permission set epicsmp.vanish.auto true`. Each new connection applies it once; a player can
+use `/vanish off` for the rest of that session. Respawning, changing worlds or game mode, and
+reloading the plugin preserve that choice. Ordinary toggles are saved atomically to `vanish.yml`
+before visibility changes and resume on reconnect. Permission updates are checked every second;
+revoking both self-vanish permissions restores visibility. Corrupt state rejects startup and a
+failed state write rejects the toggle. Flight/collision/sound/sleep/spawning baselines also travel
+with the player's persistent data, so a saved vanished player can recover their original properties
+following a crash.
+
+Status appears privately in chat and an aqua action bar. Fake leave/join announcements are controlled
+by `vanish.fake-join-quit`; real vanished joins/quits, deaths and advancement broadcasts are silent.
+Vanished players start in private chat on every vanish entry. Messages use an aqua `[Vanish]`
+label and reach other vanished players, staff with `epicsmp.vanish.see`, and console, within the
+chat event's audience. `/vanish chat public` lets you speak in public; `/vanish chat private` returns
+to private chat. `/vanish chat` toggles and `/vanish chat status` checks your mode.
+`vanish.default-chat-public` changes the entry default. Speech uses system chat packets so a hidden
+signing session cannot break client chat validation.
+Staff see the normal appearance of players they are allowed to see. Global display names, tab names
+and Bukkit scoreboards remain owned by their existing plugins.
+
+Per-viewer PacketEvents filtering covers tab entries, entity spawns/updates/equipment/effects/sounds,
+passenger/leash links, command suggestions, scoreboard team membership and score rows. It recognizes
+names and UUIDs in rendered text, component metadata and rows split across team prefix/entry/suffix.
+Cached originals are reprojected on vanish/permission changes and restored on reveal; scoreboard
+team moves, row/objective deletion and reconnect cleanup update that cache. System messages that
+identify an unseen vanished player are suppressed for that viewer. Public `/list`, server-list counts
+and samples, and Query responses also respect vanish. Packet decoding or replay failures cancel the affected
+packet, disconnect that viewer to clear stale client data and log a diagnostic.
+
+Vanished staff can attack players/mobs, place/break blocks, interact with the world and drop items
+by default. Incoming damage, hunger loss, XP pickup, collision, gliding, physical triggers, raids
+and vibrations are prevented independently. Staff do not influence natural spawning or sleep
+requirements. Combat-tagged entry is refused by default. Combat progression and weapon abilities
+are suspended for hidden staff by default, including rewards from their attacks. Explicit Strength
+item use, crafting and withdrawal remain available for testing. Forced deaths
+retain their inventory and levels. Each behavior has its own switch under `vanish` in `config.yml`.
+
+Item pickup starts disabled. `/vanish pickup` toggles it for your current session, including Strength
+items; `vanish.default-item-pickup` sets the default. `/vanish options` lists clickable switches; click `[ON]` or `[OFF]` to toggle that setting.
+`/vanish option <name> <on|off|toggle>` persists and applies a change with `epicsmp.admin`.
+Both `option` and `options` complete setting names and supported values with Tab. For example,
+`/vanish option prevent-attacking on` blocks attacks, and
+`/vanish option prevent-item-drop on` blocks dropping. Config-file edits apply with `/smp reload`.
+
+`/vanish interactions [on|off|toggle|status]` provides an admin shortcut. `on` allows attacking,
+breaking/placing, world/entity interactions, dropping, projectiles, buckets, consumption, mounting,
+beds, inventory access, physical triggers, vibrations, raids, XP pickup and gliding. It also enables
+item pickup and normal container access. `off` enables those restrictions, disables pickup and uses
+silent read-only container inspection. `toggle` switches from restricted/mixed settings to `on`,
+then from `on` to `off`; omitting the argument also toggles. Changes persist globally in one config
+transaction and reset session pickup overrides. Visibility, chat audience, incoming-damage protection
+and flight keep their own settings. The options list includes clickable group enable/disable buttons.
+
+`vanish.silent-block-actions` suppresses nearby server-sent block break/place sounds and break
+debris; hidden players' break animations are filtered. Actual block changes and damage remain visible.
+Clients may still predict local block sounds; server packet filtering cannot remove those.
+`vanish.prevent-mob-targeting` clears hostile targets, and `vanish.prevent-mob-looking` masks passive
+player-looking goals near hidden staff while allowing mobs to look at visible players. Brain-based
+mobs and other plugins' custom AI require a server playtest with the installed plugins.
+
+`vanish.grant-flight`, `vanish.client-night-vision` and `vanish.action-bar` configure staff
+conveniences. Night vision is an infinite client-only effect sent on entry or a new player entity,
+without periodic remove/reapply flashes. Ordinary potion effects continue on the server and their
+current state is restored on reveal. Previous movement and entity properties are restored on reveal,
+disconnect or plugin shutdown. Changing game mode respects native creative and spectator flight.
+
+Right-click a container while vanished with `epicsmp.vanish.inspect`, or look at it within six
+blocks and use `/vanish inspect`. This opens a private, read-only snapshot, with no real chest
+animation, sound, spectator-mode switch or inventory transfer. Clicks, hotbar keys, shift-clicks and
+drags are cancelled. Snapshot items are cloned and never written back. The admin dashboard remains
+available to staff observers.
+
+Optional integrations:
+
+- Essentials receives a hidden-state claim and recovers its previous hidden value afterward.
+- Dynmap receives a plugin-owned invisibility assertion; releasing it respects other map hiders.
+- PlaceholderAPI exposes `%epicsmp_visible_player_count%` and `%epicsmp_visible_players%`.
+  These always exclude vanished players, even if the scoreboard evaluates them in a subject's
+  context. Use them instead of an unfiltered server-online count in public scoreboards.
+- Other plugins can read `vanished` metadata and `plugin.vanish().isVanished(uuid)` /
+  `canSee(viewerUuid, subjectUuid)`. They must also honor Bukkit's `Player.canSee` for other hiders.
+
+Vanilla map player arrows are anonymous, so they are conservatively suppressed for ordinary viewers
+while any hidden staff member is online. Named marker text is filtered too; existing marker lists are
+reprojected immediately and restored when visibility permits. Numeric totals, aliases, custom map
+pixels, Discord/web exports and plugins sending packets silently require their own visibility-aware
+integration; they cannot be attributed to a player by a generic packet filter. Audit those features
+with your actual plugin set using an ordinary account alongside a staff account.
+
+Vanish playtest checklist: join with the automatic permission; toggle and reconnect; grant/revoke
+viewer permissions; teleport across worlds and respawn; check tab, `/list`, tab suggestions, server
+ping and Query; test scoreboard team prefixes, fake entries and display-name rows before/after toggles;
+verify pressure plates/sculk/containers, pickup/drop switches, private/public chat and block sounds;
+confirm combat-tagged entry is refused and staff hits create no tags or Strength by default; check the public scoreboard count and any external maps/exports.

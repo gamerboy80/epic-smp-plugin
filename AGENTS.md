@@ -7,14 +7,14 @@ progression, weapon abilities, crafting and server combat management.
 `${PACKAGE}.${NAME}` from Gradle group and rootProject.name; the project name must match this class.
 Java toolchain and CI use Java 25. Paper API is pinned to `26.2.build.132-stable`.
 
-**Commands:** Native Paper `BasicCommand` registers `/smp` and `/epicsmp` programmatically.
+**Commands:** Native Paper `BasicCommand` registers `/smp`, `/epicsmp`, `/vanish` and `/v` programmatically.
 Do not duplicate these in `plugin.yml`; permission declarations belong there.
 
 **Progression:** Immutable `Profile` and `State` snapshots, `Progression` transactions, and
 `YamlStateStore` atomic replacement/previous-commit backup. Changes are saved before active state
 changes. Corrupt data aborts startup; runtime storage failure pauses PvP. UUIDs identify accounts,
-including offline players. Schema 3 retains weapon specialties, crafted contributions and
-authenticated single-use item IDs/provenance; legacy snapshots migrate. Strength floor is 1.
+including offline players. Schema 4 retains weapon specialties, crafted contributions and
+registrations needed to convert existing item bundles; earlier snapshots migrate. Strength floor is 1.
 
 **Rules:** `Settings` validates independent YAML snapshots. `GameplayListener` handles potion caps,
 PvP attribution, grace, deaths, combat logging and spawn entry. `RuleListener` handles mace
@@ -27,14 +27,36 @@ rechecks permissions on deferred clicks and validates/persists rule toggles befo
 `CombatTracker` stores transient tags/cooldowns; persistent pair windows prevent farming across
 restarts. Melee Strength uses only a plugin-owned namespaced additive attribute modifier, independent
 of vanilla potion effects. `WeaponAbilities` owns transient combo/ultimate effects and attack-speed
-modifiers. `SmpItems` protects custom ghast tears/rerolls, registers recipes and redeems saved IDs.
-Craft provenance must survive trading and withdrawal. Individual rules live in the existing rule
+modifiers. `SmpItems` protects custom ghast tears/rerolls, registers native recipes and validates identical kind/format tags.
+Craft provenance survives trading, withdrawal and uncredited environmental deaths; credited PvP
+losses become regular Strength rewards. Item use, crafting and withdrawal support creative and
+vanished testing while preserving caps and storage-failure protection. Inventory clicks, drags, pickups, hopper
+transfers and ground merges remain native. Existing ID bundles convert once by retiring their
+registrations before replacing the physical stack. Never bypass item-acquisition cancellations. Individual rules live in the existing rule
 listeners and configuration; avoid a separate aggregate season mode.
+
+**Vanish:** `VanishService` commits UUID toggles to `vanish.yml` before activation and publishes
+immutable `VanishView` policies to packet/async threads. `epicsmp.vanish.auto` applies once at login for each connection; lifecycle reapplication
+preserves explicit reveals after respawn, world/mode changes and plugin reload.
+`VanishListener` isolates staff observers and protects lifecycle/chat/status disclosures.
+`VanishPackets` uses PacketEvents recipient filtering; `VanishScoreboard` caches originals per
+connection and restores filtered projections without changing Bukkit scoreboards. Preserve vanilla
+names/team prefixes; indicators are private. Replays run in the viewer's channel event loop.
+Player persistent data retains pre-vanish properties for crash recovery. Silent container inspection
+uses cloned, owner-bound read-only snapshots. Independent vanish switches allow world changes and
+attacks; clickable option toggles and an atomic grouped interactions command configure them.
+Private chat defaults on entry with per-player public opt-in. Client night vision uses an
+infinite overlay without periodic renewal. `VanishActions` tracks world-specific block silence, and
+`VanishMobLook` masks passive LOOK goals without disabling AI. Optional public-API hooks cover Essentials, Dynmap
+and public-safe PlaceholderAPI counts. Never query Bukkit permissions from packet/async threads.
 
 **Packaging:** `shadowJar` is the sole JAR output; `jar` is disabled and `assemble` depends on
 Shadow. No runtime libraries are shaded. The original template's cw-commons, Jackson, Hibernate
 Validator and CommandAPI dependencies were removed because native Paper APIs cover these needs.
-Paper, MockBukkit, Mockito and static-analysis dependencies remain build/test only.
+PacketEvents 2.14.0+ is a required external server plugin, with a compile-only API dependency.
+PlaceholderAPI is an optional compile-only integration. Paper, MockBukkit, Mockito and static-analysis
+dependencies remain build/test only. Test transport uses the official PacketEvents distribution's
+legacy Adventure builder fallback; this compatibility class is never packaged in the release JAR.
 
 **Versioning:** no `-Pver` gives `yyMMdd-HHmm-SNAPSHOT`; `-Pver=vX.Y.Z-RC-N` gives
 `X.Y.Z-RC-N-SNAPSHOT`; `-Pver=vX.Y.Z` gives stable `X.Y.Z`. `release` strips stable JAR filenames.

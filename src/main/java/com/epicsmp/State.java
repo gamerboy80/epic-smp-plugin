@@ -14,7 +14,7 @@ public record State(
     bottles = Map.copyOf(bottles);
   }
 
-  /** Creates a snapshot without outstanding bottles, including legacy snapshots. */
+  /** Creates a snapshot with no pending legacy item conversions. */
   public State(Map<UUID, Profile> players, Map<String, Long> pairs) {
     this(players, pairs, Map.of());
   }

@@ -92,3 +92,6 @@ venv/
 
 # Generated CLAUDE.md (source of truth is AGENTS.md)
 /CLAUDE.md
+
+# Local third-party source references
+/repo-references/

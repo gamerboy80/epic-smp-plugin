@@ -21,6 +21,10 @@ it in the same invocation. CI builds on Linux and Windows with Java 25 and exerc
 integration on Linux. Existing tag workflows prepare draft releases and optional Discord
 notifications only when their repository variables/secrets are configured.
 
+Install the official PacketEvents 2.14.0+ Spigot/Paper plugin alongside each release.
+Its Maven compile API is not a standalone server plugin. Optional PlaceholderAPI, Essentials and
+Dynmap hooks activate when installed.
+
 Before shipping, inspect processed `plugin.yml`, verify that only one plugin JAR is installed,
 and run the server playtest checklist in [usage.md](usage.md). Build success and MockBukkit tests
 are not a claim of full client/server testing with a particular server's other plugins.

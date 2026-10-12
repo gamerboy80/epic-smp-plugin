@@ -94,8 +94,8 @@ public final class Progression {
     }
     Map<UUID, Profile> players = new HashMap<>(state.players());
     Map<String, Long> pairs = new HashMap<>(state.pairs());
-    Map<UUID, ItemToken> bottles = new HashMap<>(state.bottles());
-    List<UUID> drops = new ArrayList<>();
+    final Map<UUID, ItemToken> bottles = state.bottles();
+    List<ItemToken.Kind> drops = new ArrayList<>();
     pairs.entrySet().removeIf(entry -> entry.getValue() <= now);
     int loss = settings.integer(pvp ? "strength.per-kill" : "strength.natural-death-loss");
     int strength =
@@ -111,12 +111,14 @@ public final class Progression {
               settings.integer("strength.minimum"),
               settings.integer("strength.maximum"));
       if (killer.strength() == settings.integer("strength.maximum")) {
-        addDeathDrops(bottles, drops, victim, killerId, lostStrength);
+        for (int index = 0; index < lostStrength; index++) {
+          drops.add(ItemToken.Kind.STRENGTH);
+        }
       }
       players.put(killerId, killer.progress(gain, killer.kills() + 1, killer.deaths()));
       pairs.put(pair, now + settings.integer("combat.repeat-pair-seconds") * 1000L);
     } else {
-      addDeathDrops(bottles, drops, victim, victimId, lostStrength);
+      addDeathDrops(drops, victim, lostStrength);
     }
     players.put(
         victimId,
@@ -127,22 +129,10 @@ public final class Progression {
     return new DeathResult(true, false, List.copyOf(drops));
   }
 
-  private static void addDeathDrops(
-      Map<UUID, ItemToken> bottles,
-      List<UUID> drops,
-      Profile victim,
-      UUID issuer,
-      int lostStrength) {
+  private static void addDeathDrops(List<ItemToken.Kind> drops, Profile victim, int lostStrength) {
     int craftedDrops = Math.min(victim.craftedStrength(), lostStrength);
     for (int index = 0; index < lostStrength; index++) {
-      UUID token;
-      do {
-        token = UUID.randomUUID();
-      } while (bottles.containsKey(token));
-      ItemToken.Kind kind =
-          index < craftedDrops ? ItemToken.Kind.CRAFTED_STRENGTH : ItemToken.Kind.STRENGTH;
-      bottles.put(token, new ItemToken(issuer, kind));
-      drops.add(token);
+      drops.add(index < craftedDrops ? ItemToken.Kind.CRAFTED_STRENGTH : ItemToken.Kind.STRENGTH);
     }
   }
 
@@ -193,92 +183,76 @@ public final class Progression {
     return settings.flag("combat.immunity-enabled") ? now + settings.integer(path) * 1000L : 0;
   }
 
-  /** Atomically exchanges excess Strength for individually registered, transferable bottles. */
-  public List<UUID> withdraw(UUID id, int amount) throws IOException {
+  /** Exchanges excess Strength for transferable item kinds, retaining craft provenance. */
+  public List<ItemToken.Kind> withdraw(UUID id, int amount) throws IOException {
     Profile player = require(id);
     if (amount < 1 || amount > player.strength() - 1) {
       throw new IllegalArgumentException(
           "Withdraw a positive amount while keeping at least Strength 1");
     }
-    Map<UUID, Profile> players = new HashMap<>(state.players());
-    Map<UUID, ItemToken> bottles = new HashMap<>(state.bottles());
-    List<UUID> issued = new ArrayList<>();
+    List<ItemToken.Kind> issued = new ArrayList<>();
     for (int index = 0; index < amount; index++) {
-      UUID token;
-      do {
-        token = UUID.randomUUID();
-      } while (bottles.containsKey(token));
-      bottles.put(
-          token,
-          new ItemToken(
-              id,
-              index < player.craftedStrength()
-                  ? ItemToken.Kind.CRAFTED_STRENGTH
-                  : ItemToken.Kind.STRENGTH));
-      issued.add(token);
+      issued.add(
+          index < player.craftedStrength()
+              ? ItemToken.Kind.CRAFTED_STRENGTH
+              : ItemToken.Kind.STRENGTH);
     }
+    Map<UUID, Profile> players = new HashMap<>(state.players());
     players.put(id, player.progress(player.strength() - amount, player.kills(), player.deaths()));
-    commit(new State(players, state.pairs(), bottles));
+    commit(new State(players, state.pairs(), state.bottles()));
     return List.copyOf(issued);
   }
 
-  /** Redeems a registered bottle once; saving failure leaves both token and Strength intact. */
-  public void redeem(UUID id, UUID token) throws IOException {
+  /** Saves one item redemption before the inventory controller consumes its physical item. */
+  public void redeem(UUID id, ItemToken.Kind kind) throws IOException {
     Profile player = require(id);
-    if (!state.bottles().containsKey(token)) {
-      throw new IllegalArgumentException(
-          "This Strength Bottle has already been redeemed or is invalid");
+    if (kind == null || kind == ItemToken.Kind.REROLL) {
+      throw new IllegalArgumentException("Choose a Strength item");
     }
-    ItemToken item = state.bottles().get(token);
     int cap =
-        item.kind() == ItemToken.Kind.CRAFTED_STRENGTH
+        kind == ItemToken.Kind.CRAFTED_STRENGTH
             ? Math.min(
                 settings.integer("strength.maximum"), settings.integer("strength.crafted-maximum"))
             : settings.integer("strength.maximum");
-    if (item.kind() == ItemToken.Kind.REROLL) {
-      throw new IllegalArgumentException("Use the weapon reroll controller for this item");
-    }
     if (player.strength() >= cap) {
       throw new IllegalArgumentException("This Strength item can only be used below level " + cap);
     }
     Map<UUID, Profile> players = new HashMap<>(state.players());
-    Map<UUID, ItemToken> bottles = new HashMap<>(state.bottles());
-    bottles.remove(token);
     players.put(
         id,
         new Profile(
             player.name(),
             player.strength() + 1,
-            player.craftedStrength() + (item.kind() == ItemToken.Kind.CRAFTED_STRENGTH ? 1 : 0),
+            player.craftedStrength() + (kind == ItemToken.Kind.CRAFTED_STRENGTH ? 1 : 0),
             player.weapon(),
             player.kills(),
             player.deaths(),
             player.protectionUntil()));
-    commit(new State(players, state.pairs(), bottles));
+    commit(new State(players, state.pairs(), state.bottles()));
   }
 
-  /** Issues one craft/admin item without awarding active Strength. */
-  public UUID issue(UUID id, ItemToken.Kind kind) throws IOException {
-    require(id);
-    Map<UUID, ItemToken> bottles = new HashMap<>(state.bottles());
-    UUID token = UUID.randomUUID();
-    bottles.put(token, new ItemToken(id, kind));
-    commit(new State(state.players(), state.pairs(), bottles));
-    return token;
-  }
-
-  /** Redeems a reroll and persists its replacement specialty atomically. */
-  public void reroll(UUID id, UUID token) throws IOException {
-    Profile player = require(id);
-    ItemToken item = state.bottles().get(token);
-    if (item == null || item.kind() != ItemToken.Kind.REROLL) {
-      throw new IllegalArgumentException("Invalid or already used weapon reroll");
+  /** Retires a legacy bundle before converting it; copied old bundles cannot migrate twice. */
+  public void migrateItems(List<UUID> tokens, ItemToken.Kind kind) throws IOException {
+    if (tokens.isEmpty()
+        || new java.util.HashSet<>(tokens).size() != tokens.size()
+        || tokens.stream()
+            .anyMatch(
+                token ->
+                    state.bottles().get(token) == null
+                        || state.bottles().get(token).kind() != kind)) {
+      throw new IllegalArgumentException("Invalid or already converted legacy item");
     }
-    Map<UUID, Profile> players = new HashMap<>(state.players());
     Map<UUID, ItemToken> bottles = new HashMap<>(state.bottles());
-    bottles.remove(token);
+    tokens.forEach(bottles::remove);
+    commit(new State(state.players(), state.pairs(), bottles));
+  }
+
+  /** Persists a replacement specialty before consuming a physical reroll. */
+  public void reroll(UUID id) throws IOException {
+    Profile player = require(id);
+    Map<UUID, Profile> players = new HashMap<>(state.players());
     players.put(id, player.specialty(WeaponKind.randomExcept(player.weapon())));
-    commit(new State(players, state.pairs(), bottles));
+    commit(new State(players, state.pairs(), state.bottles()));
   }
 
   /** Saves an administrator's weapon assignment. */
@@ -297,7 +271,7 @@ public final class Progression {
   }
 
   /** Outcome for player feedback. */
-  public record DeathResult(boolean applied, boolean protectedKill, List<UUID> drops) {
+  public record DeathResult(boolean applied, boolean protectedKill, List<ItemToken.Kind> drops) {
     /** Copies item IDs so the committed outcome cannot be changed by callers. */
     public DeathResult {
       drops = List.copyOf(drops);

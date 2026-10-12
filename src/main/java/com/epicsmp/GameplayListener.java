@@ -202,6 +202,12 @@ public final class GameplayListener implements Listener {
     long now = System.currentTimeMillis();
     CombatTracker.Tag tag = plugin.combat().tag(victim.getUniqueId(), now);
     Player direct = deathAttacker(event);
+    if (direct != null
+        && plugin.vanish().isVanished(direct.getUniqueId())
+        && plugin.settings().flag("vanish.suspend-progression")) {
+      plugin.combat().clear(victim.getUniqueId());
+      return;
+    }
     UUID killer = direct != null && plugin.active(direct) ? direct.getUniqueId() : null;
     if (killer == null
         && tag != null
@@ -216,7 +222,7 @@ public final class GameplayListener implements Listener {
       if (result.protectedKill()) {
         victim.sendMessage(EpicSmpPlugin.message("Repeat-pair protection: progression unchanged."));
       }
-      for (UUID token : result.drops()) {
+      for (ItemToken.Kind token : result.drops()) {
         // Spawn these separately so keepInventory and other death-drop rules cannot erase them.
         victim.getWorld().dropItemNaturally(victim.getLocation(), plugin.items().item(token));
       }

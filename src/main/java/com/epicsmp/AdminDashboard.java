@@ -131,6 +131,11 @@ public final class AdminDashboard implements Listener {
     main(player, player.getUniqueId(), null);
   }
 
+  /** Identifies private dashboard inventories for the staff observer controller. */
+  static boolean owns(Inventory inventory) {
+    return inventory.getHolder() instanceof DashboardHolder;
+  }
+
   private void permission(CommandSender player) {
     if (!player.hasPermission("epicsmp.admin")) {
       throw new IllegalArgumentException("You need epicsmp.admin to open the dashboard");

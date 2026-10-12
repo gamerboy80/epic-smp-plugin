@@ -5,7 +5,7 @@ description: Build, test, and release this Paper plugin from source. Use when as
 
 This is a Paper 26.2 / Java 25 plugin — "running" it means building from source, executing the test
 suite, and optionally producing the shaded JAR that gets dropped into a server's `plugins/`
-folder.
+folder, alongside the official PacketEvents 2.14.0+ Spigot/Paper server plugin.
 
 ## Commands
 
@@ -103,7 +103,8 @@ Keep these in sync with the current state of the project:
 
 ## Gotchas
 
-- **Packaging** — the plugin has no runtime dependencies to shade. If adding one, review
+- **Packaging** — PacketEvents is a required external server plugin; PlaceholderAPI is an
+  optional compile-only integration. The plugin has no runtime libraries to shade. If adding one, review
   relocation and reflection/SPI preservation before enabling minimization.
 - **OneDrive build lock** — if this repo lives under OneDrive, `./gradlew build` can fail with
   `Unable to delete directory '...\build\classes\java\main'` (or `...\test\binary`, or other

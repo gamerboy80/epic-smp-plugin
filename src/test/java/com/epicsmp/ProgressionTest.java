@@ -98,21 +98,20 @@ class ProgressionTest {
     assertEquals(1, result.drops().size());
     assertEquals(5, engine.profile(winner).strength());
     assertEquals(1, engine.profile(victim).strength());
-    assertEquals(
-        ItemToken.Kind.STRENGTH, engine.snapshot().bottles().get(result.drops().getFirst()).kind());
+    assertEquals(ItemToken.Kind.STRENGTH, result.drops().getFirst());
     engine.clearPair(winner, victim);
     assertTrue(engine.death(victim, winner, 3000).drops().isEmpty());
   }
 
   @Test
-  void withdrawalTradesToAnotherPlayerAndCannotRedeemTwiceAcrossRestart() throws IOException {
+  void withdrawalTradesToAnotherPlayerAndPersistsRedemptionAcrossRestart() throws IOException {
     engine.set(winner, "strength", 3);
-    List<UUID> items = engine.withdraw(winner, 2);
+    List<ItemToken.Kind> items = engine.withdraw(winner, 2);
     assertEquals(1, engine.profile(winner).strength());
     engine.redeem(victim, items.getFirst());
     assertEquals(2, engine.profile(victim).strength());
     engine = new Progression(store, new Settings(config));
-    assertThrows(IllegalArgumentException.class, () -> engine.redeem(winner, items.getFirst()));
+    assertEquals(2, engine.profile(victim).strength());
     engine.redeem(victim, items.getLast());
     assertEquals(3, engine.profile(victim).strength());
     assertTrue(engine.snapshot().bottles().isEmpty());
@@ -129,19 +128,17 @@ class ProgressionTest {
 
   @Test
   void craftedLevelsCannotBeLaunderedThroughWithdrawalOrTrading() throws IOException {
-    UUID first = engine.issue(winner, ItemToken.Kind.CRAFTED_STRENGTH);
-    UUID second = engine.issue(winner, ItemToken.Kind.CRAFTED_STRENGTH);
+    ItemToken.Kind first = ItemToken.Kind.CRAFTED_STRENGTH;
+    ItemToken.Kind second = ItemToken.Kind.CRAFTED_STRENGTH;
     engine.redeem(winner, first);
     engine.redeem(winner, second);
     assertEquals(2, engine.profile(winner).craftedStrength());
-    UUID excess = engine.issue(winner, ItemToken.Kind.CRAFTED_STRENGTH);
+    ItemToken.Kind excess = ItemToken.Kind.CRAFTED_STRENGTH;
     assertThrows(IllegalArgumentException.class, () -> engine.redeem(winner, excess));
-    List<UUID> withdrawn = engine.withdraw(winner, 2);
+    List<ItemToken.Kind> withdrawn = engine.withdraw(winner, 2);
     assertEquals(0, engine.profile(winner).craftedStrength());
     engine.set(victim, "strength", 3);
-    assertEquals(
-        ItemToken.Kind.CRAFTED_STRENGTH,
-        engine.snapshot().bottles().get(withdrawn.getFirst()).kind());
+    assertEquals(ItemToken.Kind.CRAFTED_STRENGTH, withdrawn.getFirst());
     assertThrows(IllegalArgumentException.class, () -> engine.redeem(victim, withdrawn.getFirst()));
     engine.redeem(winner, withdrawn.getFirst());
     assertEquals(2, engine.profile(winner).strength());
@@ -149,19 +146,18 @@ class ProgressionTest {
   }
 
   @Test
-  void rerollPersistsDifferentSpecialtyAndConsumesItemOnce() throws IOException {
+  void rerollPersistsDifferentSpecialty() throws IOException {
     WeaponKind original = engine.profile(winner).weapon();
-    final UUID token = engine.issue(winner, ItemToken.Kind.REROLL);
-    engine.reroll(winner, token);
+    engine.reroll(winner);
     assertNotEquals(original, engine.profile(winner).weapon());
     engine = new Progression(store, new Settings(config));
-    assertThrows(IllegalArgumentException.class, () -> engine.reroll(victim, token));
+    assertNotEquals(original, engine.profile(winner).weapon());
   }
 
   @Test
   void failedWritesDoNotPartiallyMutateProgressionOrConsumeItems() throws IOException {
     engine.set(winner, "strength", 3);
-    final UUID token = engine.issue(victim, ItemToken.Kind.STRENGTH);
+    final ItemToken.Kind token = ItemToken.Kind.STRENGTH;
     State before = engine.snapshot();
     store.fail = true;
     assertThrows(IOException.class, () -> engine.death(victim, winner, 2000));
@@ -175,13 +171,78 @@ class ProgressionTest {
   @Test
   void normalizeClampsLevelsPreservesItemsAndStatistics() throws IOException {
     engine.set(winner, "strength", 5);
-    final UUID token = engine.issue(winner, ItemToken.Kind.STRENGTH);
     engine.death(victim, winner, 2000);
     config.set("strength.maximum", 3);
     engine.normalize(new Settings(config));
     assertEquals(3, engine.profile(winner).strength());
     assertEquals(1, engine.profile(winner).kills());
+    assertTrue(engine.snapshot().bottles().isEmpty());
+  }
+
+  @Test
+  void legacyBundlesMigrateOnceAndFailedWritesPreserveTheirRegistration() throws IOException {
+    UUID token = UUID.randomUUID();
+    State prior = engine.snapshot();
+    store.state =
+        new State(
+            prior.players(),
+            prior.pairs(),
+            Map.of(token, new ItemToken(winner, ItemToken.Kind.STRENGTH)));
+    engine = new Progression(store, new Settings(config));
+    store.fail = true;
+    assertThrows(
+        IOException.class, () -> engine.migrateItems(List.of(token), ItemToken.Kind.STRENGTH));
     assertTrue(engine.snapshot().bottles().containsKey(token));
+    store.fail = false;
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> engine.migrateItems(List.of(token), ItemToken.Kind.CRAFTED_STRENGTH));
+    engine.migrateItems(List.of(token), ItemToken.Kind.STRENGTH);
+    assertTrue(engine.snapshot().bottles().isEmpty());
+    engine = new Progression(store, new Settings(config));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> engine.migrateItems(List.of(token), ItemToken.Kind.STRENGTH));
+  }
+
+  @Test
+  void craftedStrengthMaturesIntoRegularDropsOnCreditedKillsAndRespectsPairProtection()
+      throws IOException {
+    engine.set(winner, "strength", 5);
+    engine.redeem(victim, ItemToken.Kind.CRAFTED_STRENGTH);
+    engine.redeem(victim, ItemToken.Kind.CRAFTED_STRENGTH);
+    var result = engine.death(victim, winner, 2000);
+    assertEquals(List.of(ItemToken.Kind.STRENGTH), result.drops());
+    assertEquals(2, engine.profile(victim).strength());
+    assertEquals(1, engine.profile(victim).craftedStrength());
+    State committed = engine.snapshot();
+    assertTrue(engine.death(victim, winner, 3000).protectedKill());
+    assertEquals(committed, engine.snapshot());
+    engine = new Progression(store, new Settings(config));
+    assertEquals(1, engine.profile(victim).craftedStrength());
+  }
+
+  @Test
+  void environmentalAndSelfDeathsRetainCraftedDropKind() throws IOException {
+    engine.redeem(victim, ItemToken.Kind.CRAFTED_STRENGTH);
+    engine.redeem(victim, ItemToken.Kind.CRAFTED_STRENGTH);
+    assertEquals(
+        List.of(ItemToken.Kind.CRAFTED_STRENGTH), engine.death(victim, null, 2000).drops());
+    assertEquals(1, engine.profile(victim).craftedStrength());
+    assertEquals(
+        List.of(ItemToken.Kind.CRAFTED_STRENGTH), engine.death(victim, victim, 3000).drops());
+    assertEquals(0, engine.profile(victim).craftedStrength());
+    assertEquals(1, engine.profile(victim).strength());
+  }
+
+  @Test
+  void creditedKillsBelowTheCapAwardRegularLevelsFromCraftedVictims() throws IOException {
+    engine.redeem(victim, ItemToken.Kind.CRAFTED_STRENGTH);
+    var result = engine.death(victim, winner, 2000);
+    assertTrue(result.drops().isEmpty());
+    assertEquals(2, engine.profile(winner).strength());
+    assertEquals(0, engine.profile(winner).craftedStrength());
+    assertEquals(List.of(ItemToken.Kind.STRENGTH), engine.withdraw(winner, 1));
   }
 
   private static class MemoryStore implements StateStore {

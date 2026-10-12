@@ -53,12 +53,47 @@ repositories {
     }
 
     mavenCentral()
+    maven {
+        name = "placeholderapi"
+        url = uri("https://repo.helpch.at/releases/")
+        content { includeGroup("me.clip") }
+    }
+    maven {
+        name = "codemc"
+        url = uri("https://repo.codemc.io/repository/maven-releases/")
+        content { includeGroup("com.github.retrooper") }
+    }
+    ivy {
+        name = "packetEventsServerDistribution"
+        url = uri("https://github.com/retrooper/packetevents/releases/download/")
+        patternLayout { artifact("v[revision]/packetevents-spigot-[revision].[ext]") }
+        metadataSources { artifact() }
+        content { includeModule("com.github.retrooper", "packetevents-server-test") }
+    }
 }
 
 val mockitoAgent = configurations.create("mockitoAgent")
+val packetEventsDistribution = configurations.create("packetEventsDistribution")
+
+// The official server plugin bundles this legacy interface as a classloader fallback.
+// Include the same class in tests running Paper's Adventure 5, without shadowing its API.
+val packetEventsTestCompatibility = tasks.register<Zip>("packetEventsTestCompatibility") {
+    from({ zipTree(packetEventsDistribution.singleFile) }) {
+        include("net/kyori/adventure/util/Buildable\$Builder.class")
+    }
+    archiveFileName.set("packetevents-test-compatibility.jar")
+    destinationDirectory.set(layout.buildDirectory.dir("test-runtime"))
+}
+val packetEventsCompatibilityFiles = files(packetEventsTestCompatibility.flatMap { it.archiveFile })
+    .builtBy(packetEventsTestCompatibility)
 
 dependencies {
     compileOnly("io.papermc.paper:paper-api:26.2.build.132-stable")
+    compileOnly("com.github.retrooper:packetevents-spigot:2.14.0")
+    compileOnly("me.clip:placeholderapi:2.12.3") { isTransitive = false }
+    testImplementation("com.github.retrooper:packetevents-spigot:2.14.0")
+    packetEventsDistribution("com.github.retrooper:packetevents-server-test:2.14.0@jar")
+    testRuntimeOnly(packetEventsCompatibilityFiles)
 
     // Code quality and unit testing. Not required for code functionality.
     compileOnly("com.github.spotbugs:spotbugs-annotations:4.10.4")
@@ -89,9 +124,12 @@ testing {
 
             dependencies {
                 implementation(sourceSets.main.get().output)
+                implementation(sourceSets.test.get().output)
                 implementation("org.mockbukkit.mockbukkit:mockbukkit-v26.2:4.117.0")
                 implementation("org.mockito:mockito-core:5.24.0")
                 implementation("io.papermc.paper:paper-api:26.2.build.132-stable")
+                implementation("com.github.retrooper:packetevents-spigot:2.14.0")
+                runtimeOnly(packetEventsCompatibilityFiles)
             }
 
             targets {
@@ -110,7 +148,13 @@ configurations.named("integrationTestImplementation") {
     extendsFrom(configurations.implementation.get())
 }
 
+configurations.named("integrationTestCompileOnly") {
+    extendsFrom(configurations.testCompileOnly.get())
+}
+
 tasks.processResources {
+    inputs.properties(mapOf("pluginName" to rootProject.name,
+        "pluginVersion" to project.version.toString(), "pluginGroup" to project.group.toString()))
     filesMatching("**/plugin.yml") {
         expand(mapOf("NAME" to rootProject.name, "VERSION" to version, "PACKAGE" to project.group))
     }

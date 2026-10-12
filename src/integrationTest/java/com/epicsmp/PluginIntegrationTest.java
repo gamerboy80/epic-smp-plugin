@@ -71,6 +71,8 @@ class PluginIntegrationTest {
   @BeforeEach
   void setup() throws IOException {
     server = MockBukkit.mock(new TestServerMock());
+    TestPacketEvents.install();
+    MockBukkit.createMockPlugin("packetevents");
     server.addSimpleWorld("world");
     YamlConfiguration config =
         YamlConfiguration.loadConfiguration(
@@ -825,7 +827,7 @@ class PluginIntegrationTest {
   }
 
   @Test
-  void namedGhastTearsTradeFromEitherHandRejectCopiesAndKeepItemsAtCap() throws IOException {
+  void namedGhastTearsTradeFromEitherHandRejectFakeNamesAndKeepItemsAtCap() throws IOException {
     plugin.progression().set(attacker.getUniqueId(), "strength", 3);
     attacker.performCommand("smp withdraw 2");
     assertEquals(1, plugin.progression().profile(attacker.getUniqueId()).strength());
@@ -833,51 +835,54 @@ class PluginIntegrationTest {
     assertEquals(Material.GHAST_TEAR, first.getType());
     assertEquals(2, first.getAmount());
     assertEquals("Strength", plain(first.getItemMeta().displayName()));
-    final ItemStack copy = first.clone();
     victim.getInventory().setItemInOffHand(first);
     attacker.getInventory().setItem(0, null);
     useCustom(victim, EquipmentSlot.OFF_HAND);
     assertEquals(2, plugin.progression().profile(victim.getUniqueId()).strength());
     assertEquals(1, victim.getInventory().getItemInOffHand().getAmount());
-    victim.getInventory().setItemInMainHand(copy);
+    ItemStack fake = new ItemStack(Material.GHAST_TEAR);
+    var meta = fake.getItemMeta();
+    meta.displayName(Component.text("Strength"));
+    fake.setItemMeta(meta);
+    victim.getInventory().setItemInMainHand(fake);
     useCustom(victim, EquipmentSlot.HAND);
     assertEquals(2, plugin.progression().profile(victim.getUniqueId()).strength());
-    assertEquals(2, victim.getInventory().getItemInMainHand().getAmount());
+    assertEquals(fake, victim.getInventory().getItemInMainHand());
     ItemStack second = victim.getInventory().getItemInOffHand();
     victim.getInventory().setItemInOffHand(null);
     victim.getInventory().setItemInMainHand(second);
     useCustom(victim, EquipmentSlot.HAND);
     assertEquals(3, plugin.progression().profile(victim.getUniqueId()).strength());
     plugin.progression().set(victim.getUniqueId(), "strength", 5);
-    java.util.UUID cappedToken =
-        plugin.progression().issue(victim.getUniqueId(), ItemToken.Kind.STRENGTH);
+    ItemToken.Kind cappedToken = ItemToken.Kind.STRENGTH;
     ItemStack cappedItem = plugin.items().item(cappedToken);
     victim.getInventory().setItemInMainHand(cappedItem);
     useCustom(victim, EquipmentSlot.HAND);
     assertEquals(cappedItem, victim.getInventory().getItemInMainHand());
-    assertEquals(1, plugin.progression().snapshot().bottles().size());
+    assertEquals(0, plugin.progression().snapshot().bottles().size());
   }
 
   @Test
   void strengthItemStacksMergeOnPickupAndRedeemIndividually() throws IOException {
-    java.util.UUID firstToken =
-        plugin.progression().issue(attacker.getUniqueId(), ItemToken.Kind.STRENGTH);
-    final java.util.UUID secondToken =
-        plugin.progression().issue(attacker.getUniqueId(), ItemToken.Kind.STRENGTH);
+    ItemToken.Kind firstToken = ItemToken.Kind.STRENGTH;
+    final ItemToken.Kind secondToken = ItemToken.Kind.STRENGTH;
     org.bukkit.entity.Item firstDrop =
         attacker.getWorld().dropItem(attacker.getLocation(), plugin.items().item(firstToken));
     EntityPickupItemEvent firstPickup = new EntityPickupItemEvent(attacker, firstDrop, 0);
     server.getPluginManager().callEvent(firstPickup);
-    assertTrue(firstPickup.isCancelled());
-    assertFalse(firstDrop.isValid());
+    assertFalse(firstPickup.isCancelled());
+    assertTrue(firstDrop.isValid());
+    assertEquals(null, attacker.getInventory().getItem(0));
+    nativePickup(attacker, firstDrop);
     org.bukkit.entity.Item secondDrop =
         attacker.getWorld().dropItem(attacker.getLocation(), plugin.items().item(secondToken));
     EntityPickupItemEvent secondPickup = new EntityPickupItemEvent(attacker, secondDrop, 0);
     server.getPluginManager().callEvent(secondPickup);
-    assertTrue(secondPickup.isCancelled());
+    assertFalse(secondPickup.isCancelled());
+    nativePickup(attacker, secondDrop);
     ItemStack stack = attacker.getInventory().getItem(0);
     assertEquals(2, stack.getAmount());
-    assertEquals(2, plugin.progression().snapshot().bottles().size());
+    assertEquals(0, plugin.progression().snapshot().bottles().size());
     ItemStack droppedStack = stack.clone();
     droppedStack.setAmount(1);
     ItemStack remainingStack = stack.clone();
@@ -892,7 +897,8 @@ class PluginIntegrationTest {
     assertEquals(1, attacker.getInventory().getItem(0).getAmount());
     EntityPickupItemEvent rePickup = new EntityPickupItemEvent(attacker, droppedEntity, 0);
     server.getPluginManager().callEvent(rePickup);
-    assertTrue(rePickup.isCancelled());
+    assertFalse(rePickup.isCancelled());
+    nativePickup(attacker, droppedEntity);
     assertEquals(2, attacker.getInventory().getItem(0).getAmount());
     attacker.getInventory().setItemInMainHand(attacker.getInventory().getItem(0));
     useCustom(attacker, EquipmentSlot.HAND);
@@ -915,8 +921,7 @@ class PluginIntegrationTest {
     State before = plugin.progression().snapshot();
     attacker.performCommand("smp withdraw 1");
     assertEquals(before, plugin.progression().snapshot());
-    java.util.UUID token =
-        plugin.progression().issue(victim.getUniqueId(), ItemToken.Kind.STRENGTH);
+    ItemToken.Kind token = ItemToken.Kind.STRENGTH;
     ItemStack item = plugin.items().item(token);
     victim.getInventory().setItemInOffHand(item);
     State issued = plugin.progression().snapshot();
@@ -929,8 +934,7 @@ class PluginIntegrationTest {
 
   @Test
   void customItemsRejectAnvilAndBrewingAndNormalizeEditedPresentation() throws IOException {
-    java.util.UUID token =
-        plugin.progression().issue(attacker.getUniqueId(), ItemToken.Kind.STRENGTH);
+    ItemToken.Kind token = ItemToken.Kind.STRENGTH;
     ItemStack item = plugin.items().item(token);
     org.bukkit.inventory.meta.ItemMeta edited = item.getItemMeta();
     edited.displayName(Component.text("Renamed"));
@@ -961,7 +965,7 @@ class PluginIntegrationTest {
   }
 
   @Test
-  void recipesMatchSeasonFourAndCraftingIssuesDistinctRegisteredItems() {
+  void recipesMatchSeasonFourAndNativeCraftingKeepsTheirTags() {
     org.bukkit.inventory.ShapedRecipe recipe =
         (org.bukkit.inventory.ShapedRecipe)
             server.getRecipe(new org.bukkit.NamespacedKey(plugin, "strength_item"));
@@ -997,7 +1001,7 @@ class PluginIntegrationTest {
             ClickType.SHIFT_LEFT,
             InventoryAction.MOVE_TO_OTHER_INVENTORY);
     server.getPluginManager().callEvent(shift);
-    assertTrue(shift.isCancelled());
+    assertFalse(shift.isCancelled());
     assertTrue(plugin.progression().snapshot().bottles().isEmpty());
     org.bukkit.event.inventory.CraftItemEvent craft =
         new org.bukkit.event.inventory.CraftItemEvent(
@@ -1005,16 +1009,14 @@ class PluginIntegrationTest {
             view,
             InventoryType.SlotType.RESULT,
             0,
-            ClickType.LEFT,
-            InventoryAction.PICKUP_ALL);
+            ClickType.NUMBER_KEY,
+            InventoryAction.HOTBAR_SWAP,
+            1);
     server.getPluginManager().callEvent(craft);
-    assertTrue(craft.isCancelled());
-    assertEquals(1, plugin.progression().snapshot().bottles().size());
-    assertEquals(Material.GHAST_TEAR, attacker.getItemOnCursor().getType());
-    assertEquals(
-        ItemToken.Kind.CRAFTED_STRENGTH,
-        plugin.progression().snapshot().bottles().values().iterator().next().kind());
-    assertEquals(1, inventory.getMatrix()[0].getAmount());
+    assertFalse(craft.isCancelled());
+    assertTrue(recipe.getResult().isSimilar(plugin.items().item(ItemToken.Kind.CRAFTED_STRENGTH)));
+    // MockBukkit does not execute native craft transactions after firing these events.
+    assertEquals(2, inventory.getMatrix()[0].getAmount());
   }
 
   private void specialty(WeaponKind weapon, int strength, Material material) throws IOException {
@@ -1263,6 +1265,745 @@ class PluginIntegrationTest {
     assertFalse(victim.hasPotionEffect(PotionEffectType.POISON));
   }
 
+  @Test
+  void vanishCommandHidesOnlyFromOrdinaryViewersAndRestoresPlayerState() throws IOException {
+    attacker.setOp(true);
+    final var name = attacker.displayName();
+    final var tabName = attacker.playerListName();
+    final boolean collisions = attacker.isCollidable();
+    final boolean sleeping = attacker.isSleepingIgnored();
+    final boolean spawning = attacker.getAffectsSpawning();
+    attacker.performCommand("vanish");
+    assertTrue(plugin.vanish().isVanished(attacker.getUniqueId()));
+    assertFalse(victim.canSee(attacker));
+    assertTrue(plugin.vanish().canSee(attacker.getUniqueId(), attacker.getUniqueId()));
+    assertFalse(plugin.active(attacker));
+    assertTrue(attacker.getAllowFlight());
+    assertFalse(attacker.isCollidable());
+    assertFalse(attacker.getAffectsSpawning());
+    assertTrue(attacker.isSleepingIgnored());
+    assertEquals(name, attacker.displayName());
+    assertEquals(tabName, attacker.playerListName());
+    assertTrue(
+        new VanishStore(plugin.getDataFolder().toPath().resolve("vanish.yml"))
+            .load()
+            .contains(attacker.getUniqueId()));
+    attacker.performCommand("vanish off");
+    assertFalse(plugin.vanish().isVanished(attacker.getUniqueId()));
+    assertTrue(victim.canSee(attacker));
+    assertTrue(plugin.active(attacker));
+    assertFalse(attacker.getAllowFlight());
+    assertEquals(collisions, attacker.isCollidable());
+    assertEquals(sleeping, attacker.isSleepingIgnored());
+    assertEquals(spawning, attacker.getAffectsSpawning());
+  }
+
+  @Test
+  void vanishAllowsAttacksWithoutTagsAndBlocksCombatTaggedEntry() throws IOException {
+    attacker.setOp(true);
+    plugin.vanish().setVanished(attacker, true);
+    EntityDamageByEntityEvent damage =
+        new EntityDamageByEntityEvent(
+            attacker,
+            victim,
+            EntityDamageEvent.DamageCause.ENTITY_ATTACK,
+            DamageSource.builder(DamageType.PLAYER_ATTACK)
+                .withCausingEntity(attacker)
+                .withDirectEntity(attacker)
+                .build(),
+            4);
+    server.getPluginManager().callEvent(damage);
+    assertFalse(damage.isCancelled());
+    plugin.updateRule("vanish.prevent-attacking", true);
+    damage.setCancelled(false);
+    server.getPluginManager().callEvent(damage);
+    assertTrue(damage.isCancelled());
+    assertEquals(null, plugin.combat().tag(victim.getUniqueId(), System.currentTimeMillis()));
+    EntityDamageEvent fall =
+        new EntityDamageEvent(
+            attacker,
+            EntityDamageEvent.DamageCause.FALL,
+            DamageSource.builder(DamageType.FALL).build(),
+            5);
+    server.getPluginManager().callEvent(fall);
+    assertTrue(fall.isCancelled());
+    plugin.vanish().setVanished(attacker, false);
+    plugin
+        .combat()
+        .hit(attacker.getUniqueId(), victim.getUniqueId(), System.currentTimeMillis(), 30);
+    org.junit.jupiter.api.Assertions.assertThrows(
+        IllegalArgumentException.class, () -> plugin.vanish().setVanished(attacker, true));
+    assertFalse(plugin.vanish().isVanished(attacker.getUniqueId()));
+  }
+
+  @Test
+  void autoPermissionAlwaysVanishesOnJoinEvenAfterExplicitReveal() throws IOException {
+    attacker.addAttachment(plugin, "epicsmp.vanish.auto", true);
+    plugin.vanish().left(attacker);
+    plugin.vanish().joined(attacker);
+    assertTrue(plugin.vanish().isVanished(attacker.getUniqueId()));
+    assertFalse(victim.canSee(attacker));
+    plugin.vanish().setVanished(attacker, false);
+    assertFalse(plugin.vanish().isVanished(attacker.getUniqueId()));
+    plugin.vanish().left(attacker);
+    org.bukkit.event.player.PlayerJoinEvent join =
+        new org.bukkit.event.player.PlayerJoinEvent(attacker, Component.text("Attacker joined"));
+    server.getPluginManager().callEvent(join);
+    assertTrue(plugin.vanish().isVanished(attacker.getUniqueId()));
+    assertEquals(null, join.joinMessage());
+  }
+
+  @Test
+  void permissionChangesUpdateVisibilityAndRevokedUseRestoresFlight() throws IOException {
+    var permission = attacker.addAttachment(plugin);
+    permission.setPermission("epicsmp.vanish", true);
+    plugin.vanish().setVanished(attacker, true);
+    assertFalse(victim.canSee(attacker));
+    var see = victim.addAttachment(plugin, "epicsmp.vanish.see", true);
+    server.getScheduler().performTicks(20);
+    assertTrue(victim.canSee(attacker));
+    see.setPermission("epicsmp.vanish.see", false);
+    server.getScheduler().performTicks(20);
+    assertFalse(victim.canSee(attacker));
+    permission.setPermission("epicsmp.vanish", false);
+    server.getScheduler().performTicks(20);
+    assertFalse(plugin.vanish().isVanished(attacker.getUniqueId()));
+    assertFalse(attacker.getAllowFlight());
+    assertTrue(victim.canSee(attacker));
+  }
+
+  @Test
+  void vanishedContainersArePrivateSnapshotsAndEveryTransferIsCancelled() throws IOException {
+    attacker.setOp(true);
+    plugin.vanish().setVanished(attacker, true);
+    var block = attacker.getWorld().getBlockAt(5, 70, 5);
+    block.setType(Material.CHEST);
+    org.bukkit.block.Chest chest = (org.bukkit.block.Chest) block.getState();
+    chest.getInventory().setItem(0, new ItemStack(Material.DIAMOND, 3));
+    PlayerInteractEvent interaction =
+        new PlayerInteractEvent(
+            attacker,
+            Action.RIGHT_CLICK_BLOCK,
+            null,
+            block,
+            org.bukkit.block.BlockFace.UP,
+            EquipmentSlot.HAND);
+    server.getPluginManager().callEvent(interaction);
+    assertEquals(org.bukkit.event.Event.Result.DENY, interaction.useInteractedBlock());
+    server.getScheduler().performTicks(1);
+    InventoryClickEvent transfer =
+        new InventoryClickEvent(
+            attacker.getOpenInventory(),
+            InventoryType.SlotType.CONTAINER,
+            0,
+            ClickType.SHIFT_LEFT,
+            InventoryAction.MOVE_TO_OTHER_INVENTORY);
+    server.getPluginManager().callEvent(transfer);
+    assertTrue(transfer.isCancelled());
+    assertEquals(3, chest.getInventory().getItem(0).getAmount());
+    assertEquals(3, attacker.getOpenInventory().getTopInventory().getItem(0).getAmount());
+    attacker.performCommand("smp admin menu");
+    assertEquals(InventoryType.CHEST, attacker.getOpenInventory().getType());
+  }
+
+  @Test
+  void vanishReloadRestoresFlightAndKeepsRealNightVisionIndependent() throws IOException {
+    attacker.setOp(true);
+    attacker.addPotionEffect(new PotionEffect(PotionEffectType.NIGHT_VISION, 600, 0));
+    var effect = attacker.getPotionEffect(PotionEffectType.NIGHT_VISION);
+    plugin.vanish().setVanished(attacker, true);
+    assertEquals(effect, attacker.getPotionEffect(PotionEffectType.NIGHT_VISION));
+    assertTrue(attacker.getAllowFlight());
+    plugin.updateRule("vanish.grant-flight", false);
+    assertFalse(attacker.getAllowFlight());
+    assertTrue(plugin.vanish().isVanished(attacker.getUniqueId()));
+    plugin.vanish().setVanished(attacker, false);
+    assertEquals(effect, attacker.getPotionEffect(PotionEffectType.NIGHT_VISION));
+  }
+
+  @Test
+  void failedVanishSaveDoesNotHidePlayerOrGrantFlight() throws IOException {
+    attacker.setOp(true);
+    Path temporary = plugin.getDataFolder().toPath().resolve("vanish.yml.tmp");
+    Files.createDirectory(temporary);
+    try {
+      org.junit.jupiter.api.Assertions.assertThrows(
+          IOException.class, () -> plugin.vanish().setVanished(attacker, true));
+      assertFalse(plugin.vanish().isVanished(attacker.getUniqueId()));
+      assertTrue(victim.canSee(attacker));
+      assertFalse(attacker.getAllowFlight());
+    } finally {
+      Files.delete(temporary);
+    }
+  }
+
+  @Test
+  void savedCrashBaselineRestoresOriginalPropertiesOnVisibleJoin() throws IOException {
+    attacker.setOp(true);
+    attacker.setAllowFlight(true);
+    attacker.setSilent(true);
+    attacker.setCollidable(false);
+    attacker.setSleepingIgnored(true);
+    attacker.setAffectsSpawning(false);
+    var key = new org.bukkit.NamespacedKey(plugin, "vanish_baseline");
+    attacker
+        .getPersistentDataContainer()
+        .set(
+            key,
+            org.bukkit.persistence.PersistentDataType.STRING,
+            "1;false;false;true;false;false;true;SURVIVAL");
+    plugin.vanish().joined(attacker);
+    assertFalse(plugin.vanish().isVanished(attacker.getUniqueId()));
+    assertFalse(attacker.getAllowFlight());
+    assertFalse(attacker.isSilent());
+    assertTrue(attacker.isCollidable());
+    assertFalse(attacker.isSleepingIgnored());
+    assertTrue(attacker.getAffectsSpawning());
+    assertFalse(attacker.getPersistentDataContainer().has(key));
+  }
+
+  @Test
+  void inspectionCannotBeOpenedByAnotherViewerOrRetainedAfterPermissionRevocation()
+      throws IOException {
+    attacker.setOp(true);
+    plugin.vanish().setVanished(attacker, true);
+    var block = attacker.getWorld().getBlockAt(5, 70, 5);
+    block.setType(Material.CHEST);
+    PlayerInteractEvent interaction =
+        new PlayerInteractEvent(
+            attacker,
+            Action.RIGHT_CLICK_BLOCK,
+            null,
+            block,
+            org.bukkit.block.BlockFace.UP,
+            EquipmentSlot.HAND);
+    server.getPluginManager().callEvent(interaction);
+    server.getScheduler().performTicks(1);
+    var snapshot = attacker.getOpenInventory().getTopInventory();
+    victim.openInventory(snapshot);
+    assertFalse(snapshot.equals(victim.getOpenInventory().getTopInventory()));
+    attacker.addAttachment(plugin, "epicsmp.vanish.inspect", false);
+    server.getScheduler().performTicks(20);
+    assertFalse(snapshot.equals(attacker.getOpenInventory().getTopInventory()));
+  }
+
+  @Test
+  void publicPingFiltersCountAndPlayerSampleFromTheSameSnapshot() throws IOException {
+    attacker.setOp(true);
+    plugin.vanish().setVanished(attacker, true);
+    var ping =
+        org.mockito.Mockito.mock(
+            com.destroystokyo.paper.event.server.PaperServerListPingEvent.class);
+    var sample =
+        new ArrayList<
+            com.destroystokyo.paper.event.server.PaperServerListPingEvent.ListedPlayerInfo>();
+    sample.add(
+        new com.destroystokyo.paper.event.server.PaperServerListPingEvent.ListedPlayerInfo(
+            attacker.getName(), attacker.getUniqueId()));
+    sample.add(
+        new com.destroystokyo.paper.event.server.PaperServerListPingEvent.ListedPlayerInfo(
+            victim.getName(), victim.getUniqueId()));
+    org.mockito.Mockito.when(ping.getNumPlayers()).thenReturn(2);
+    org.mockito.Mockito.when(ping.getListedPlayers()).thenReturn(sample);
+    new VanishListener(plugin, plugin.vanish()).ping(ping);
+    org.mockito.Mockito.verify(ping).setNumPlayers(1);
+    assertEquals(
+        java.util.List.of(victim.getUniqueId()),
+        sample.stream()
+            .map(com.destroystokyo.paper.event.server.PaperServerListPingEvent.ListedPlayerInfo::id)
+            .toList());
+  }
+
+  @Test
+  void vanishedChatFiltersPrivateAudiencesAndPublicSpeechUsesSystemPackets() throws IOException {
+    attacker.setOp(true);
+    plugin.vanish().setVanished(attacker, true);
+    final var event = org.mockito.Mockito.mock(io.papermc.paper.event.player.AsyncChatEvent.class);
+    var unknownAudience = org.mockito.Mockito.mock(net.kyori.adventure.audience.Audience.class);
+    var audiences = new java.util.HashSet<net.kyori.adventure.audience.Audience>();
+    audiences.add(attacker);
+    audiences.add(victim);
+    audiences.add(server.getConsoleSender());
+    audiences.add(unknownAudience);
+    org.mockito.Mockito.when(event.getPlayer()).thenReturn(attacker);
+    org.mockito.Mockito.when(event.viewers()).thenReturn(audiences);
+    org.mockito.Mockito.when(event.message()).thenReturn(Component.text("Hello"));
+    VanishListener listener = new VanishListener(plugin, plugin.vanish());
+    listener.chat(event);
+    assertEquals(java.util.Set.of(attacker, server.getConsoleSender()), audiences);
+    attacker.performCommand("vanish chat public");
+    audiences.clear();
+    audiences.add(victim);
+    var renderer = org.mockito.Mockito.mock(io.papermc.paper.chat.ChatRenderer.class);
+    org.mockito.Mockito.when(event.renderer()).thenReturn(renderer);
+    org.mockito.Mockito.when(event.message()).thenReturn(Component.text("Hello"));
+    org.mockito.Mockito.when(
+            renderer.render(attacker, attacker.displayName(), Component.text("Hello"), victim))
+        .thenReturn(Component.text("Attacker: Hello"));
+    var user =
+        org.mockito.Mockito.mock(com.github.retrooper.packetevents.protocol.player.User.class);
+    org.mockito.Mockito.when(
+            com.github.retrooper.packetevents.PacketEvents.getAPI()
+                .getPlayerManager()
+                .getUser(victim))
+        .thenReturn(user);
+    listener.chat(event);
+    org.mockito.Mockito.verify(event, org.mockito.Mockito.times(2)).setCancelled(true);
+    org.mockito.Mockito.verify(user)
+        .sendPacketSilently(
+            org.mockito.ArgumentMatchers.any(
+                com.github.retrooper.packetevents.wrapper.play.server
+                    .WrapperPlayServerSystemChatMessage.class));
+    org.mockito.Mockito.when(
+            com.github.retrooper.packetevents.PacketEvents.getAPI()
+                .getPlayerManager()
+                .getUser(victim))
+        .thenReturn(null);
+  }
+
+  // MockBukkit does not execute native entity item-pickup physics after firing the event.
+  private void nativePickup(PlayerMock player, org.bukkit.entity.Item drop) {
+    var remaining = player.getInventory().addItem(drop.getItemStack().clone());
+    if (remaining.isEmpty()) {
+      drop.remove();
+    } else {
+      drop.setItemStack(remaining.values().iterator().next());
+    }
+    server.getScheduler().performTicks(1);
+  }
+
+  @Test
+  void pickupOffBlocksStrengthAndOrdinaryItemsAndDropDefaultsToAllowed() throws IOException {
+    attacker.setOp(true);
+    plugin.vanish().setVanished(attacker, true);
+    var token = ItemToken.Kind.STRENGTH;
+    for (var stack :
+        java.util.List.of(plugin.items().item(token), new ItemStack(Material.DIAMOND))) {
+      var entity = attacker.getWorld().dropItem(attacker.getLocation(), stack);
+      var attempt = new org.bukkit.event.player.PlayerAttemptPickupItemEvent(attacker, entity);
+      server.getPluginManager().callEvent(attempt);
+      assertTrue(attempt.isCancelled());
+      assertFalse(attempt.getFlyAtPlayer());
+      var pickup = new EntityPickupItemEvent(attacker, entity, 0);
+      server.getPluginManager().callEvent(pickup);
+      assertTrue(pickup.isCancelled());
+      assertTrue(entity.isValid());
+      assertTrue(attacker.getInventory().isEmpty());
+    }
+    attacker.performCommand("vanish pickup");
+    var entity = attacker.getWorld().dropItem(attacker.getLocation(), plugin.items().item(token));
+    var pickup = new EntityPickupItemEvent(attacker, entity, 0);
+    server.getPluginManager().callEvent(pickup);
+    assertFalse(pickup.isCancelled());
+    nativePickup(attacker, entity);
+    assertNotNull(attacker.getInventory().getItem(0));
+    var dropped =
+        attacker.getWorld().dropItem(attacker.getLocation(), new ItemStack(Material.DIAMOND));
+    var drop = new PlayerDropItemEvent(attacker, dropped);
+    server.getPluginManager().callEvent(drop);
+    assertFalse(drop.isCancelled());
+    attacker.performCommand("vanish option prevent-item-drop on");
+    drop.setCancelled(false);
+    server.getPluginManager().callEvent(drop);
+    assertTrue(drop.isCancelled());
+  }
+
+  @Test
+  void vanishedBlocksAndNormalClicksWorkAndRestrictionsReloadIndependently() throws IOException {
+    attacker.setOp(true);
+    plugin.vanish().setVanished(attacker, true);
+    var block = attacker.getWorld().getBlockAt(1, 70, 1);
+    block.setType(Material.STONE);
+    var breakEvent = new org.bukkit.event.block.BlockBreakEvent(block, attacker);
+    server.getPluginManager().callEvent(breakEvent);
+    assertFalse(breakEvent.isCancelled());
+    var place =
+        new org.bukkit.event.block.BlockPlaceEvent(
+            block,
+            block.getState(),
+            block,
+            new ItemStack(Material.STONE),
+            attacker,
+            true,
+            EquipmentSlot.HAND);
+    server.getPluginManager().callEvent(place);
+    assertFalse(place.isCancelled());
+    var click =
+        new PlayerInteractEvent(
+            attacker,
+            Action.RIGHT_CLICK_BLOCK,
+            new ItemStack(Material.STONE),
+            block,
+            org.bukkit.block.BlockFace.UP,
+            EquipmentSlot.HAND);
+    server.getPluginManager().callEvent(click);
+    assertFalse(click.isCancelled());
+    plugin.updateRule("vanish.prevent-block-breaking", true);
+    server.getPluginManager().callEvent(breakEvent);
+    assertTrue(breakEvent.isCancelled());
+    assertFalse(place.isCancelled());
+    plugin.updateRule("vanish.prevent-world-interactions", true);
+    server.getPluginManager().callEvent(click);
+    assertEquals(org.bukkit.event.Event.Result.DENY, click.useItemInHand());
+  }
+
+  @Test
+  void infiniteNightVisionIsNotResentByEveryMaintenanceTick() throws IOException {
+    attacker.setOp(true);
+    var user =
+        org.mockito.Mockito.mock(com.github.retrooper.packetevents.protocol.player.User.class);
+    org.mockito.Mockito.when(user.getEncoderState())
+        .thenReturn(com.github.retrooper.packetevents.protocol.ConnectionState.PLAY);
+    org.mockito.Mockito.when(
+            com.github.retrooper.packetevents.PacketEvents.getAPI()
+                .getPlayerManager()
+                .getUser(attacker))
+        .thenReturn(user);
+    plugin.vanish().setVanished(attacker, true);
+    server.getScheduler().performTicks(80);
+    var packets =
+        org.mockito.ArgumentCaptor.forClass(
+            com.github.retrooper.packetevents.wrapper.PacketWrapper.class);
+    org.mockito.Mockito.verify(user, org.mockito.Mockito.times(1))
+        .sendPacketSilently(packets.capture());
+    var effect =
+        (com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerEntityEffect)
+            packets.getValue();
+    assertEquals(-1, effect.getEffectDurationTicks());
+    plugin.updateRule("vanish.client-night-vision", false);
+    org.mockito.Mockito.verify(user, org.mockito.Mockito.times(2))
+        .sendPacketSilently(
+            org.mockito.ArgumentMatchers.any(
+                com.github.retrooper.packetevents.wrapper.PacketWrapper.class));
+    org.mockito.Mockito.when(
+            com.github.retrooper.packetevents.PacketEvents.getAPI()
+                .getPlayerManager()
+                .getUser(attacker))
+        .thenReturn(null);
+  }
+
+  @Test
+  void passiveMobLookIgnoresHiddenStaffAndReturnsToNormalWhenDisabled() throws IOException {
+    attacker.setOp(true);
+    plugin.vanish().setVanished(attacker, true);
+    var mob = org.mockito.Mockito.mock(org.bukkit.entity.Mob.class);
+    org.mockito.Mockito.when(mob.isValid()).thenReturn(true);
+    org.mockito.Mockito.when(mob.getLocation()).thenReturn(attacker.getLocation());
+    org.mockito.Mockito.when(mob.getNearbyEntities(16, 16, 16))
+        .thenReturn(java.util.List.of(attacker, victim));
+    var goal = new VanishMobLook(plugin, plugin.vanish(), mob);
+    assertTrue(goal.shouldActivate());
+    goal.tick();
+    org.mockito.Mockito.verify(mob).lookAt(victim);
+    plugin.updateRule("vanish.prevent-mob-looking", false);
+    assertFalse(goal.shouldActivate());
+    assertEquals(
+        java.util.EnumSet.of(com.destroystokyo.paper.entity.ai.GoalType.LOOK), goal.getTypes());
+  }
+
+  @Test
+  void nativeStrengthPickupRespectsCancellationAndFullStorage() throws IOException {
+    var token = ItemToken.Kind.STRENGTH;
+    var stack = plugin.items().item(token);
+    var entity = attacker.getWorld().dropItem(attacker.getLocation(), stack);
+    var cancelled = new EntityPickupItemEvent(attacker, entity, 0);
+    cancelled.setCancelled(true);
+    server.getPluginManager().callEvent(cancelled);
+    server.getScheduler().performTicks(1);
+    assertTrue(entity.isValid());
+    assertTrue(attacker.getInventory().isEmpty());
+    for (int slot = 0; slot < 36; slot++) {
+      attacker.getInventory().setItem(slot, new ItemStack(Material.STONE, 64));
+    }
+    var full = new EntityPickupItemEvent(attacker, entity, 1);
+    server.getPluginManager().callEvent(full);
+    // Vanilla reports the uncollected item; this boundary does not run pickup physics in
+    // MockBukkit.
+    server.getScheduler().performTicks(1);
+    assertTrue(entity.isValid());
+    assertEquals(stack, entity.getItemStack());
+    assertFalse(attacker.getInventory().contains(Material.GHAST_TEAR));
+  }
+
+  @Test
+  void privateChatIncludesHiddenParticipantsAndResetsOnVanishEntry() throws IOException {
+    attacker.setOp(true);
+    victim.addAttachment(plugin, "epicsmp.vanish", true);
+    victim.addAttachment(plugin, "epicsmp.vanish.see", false);
+    plugin.vanish().setVanished(attacker, true);
+    plugin.vanish().setVanished(victim, true);
+    var regular = server.addPlayer("RegularViewer");
+    final var event = org.mockito.Mockito.mock(io.papermc.paper.event.player.AsyncChatEvent.class);
+    var audiences = new java.util.HashSet<net.kyori.adventure.audience.Audience>();
+    audiences.add(attacker);
+    audiences.add(victim);
+    audiences.add(regular);
+    org.mockito.Mockito.when(event.getPlayer()).thenReturn(attacker);
+    org.mockito.Mockito.when(event.viewers()).thenReturn(audiences);
+    org.mockito.Mockito.when(event.message()).thenReturn(Component.text("Staff message"));
+    new VanishListener(plugin, plugin.vanish()).chat(event);
+    assertEquals(java.util.Set.of(attacker, victim), audiences);
+    attacker.performCommand("vanish chat public");
+    assertTrue(plugin.vanish().publicChat(attacker.getUniqueId()));
+    plugin.vanish().setVanished(attacker, false);
+    plugin.vanish().setVanished(attacker, true);
+    assertFalse(plugin.vanish().publicChat(attacker.getUniqueId()));
+  }
+
+  @Test
+  void taggedStrengthLeavesInventoryClicksDragsHoppersAndGroundMergesNative() {
+    var item = plugin.items().item(ItemToken.Kind.STRENGTH);
+    var another = plugin.items().item(ItemToken.Kind.STRENGTH);
+    assertTrue(item.isSimilar(another));
+    assertFalse(item.isSimilar(plugin.items().item(ItemToken.Kind.CRAFTED_STRENGTH)));
+    assertFalse(
+        item.getPersistentDataContainer()
+            .has(new org.bukkit.NamespacedKey(plugin, "strength_bottle")));
+    attacker.getInventory().setItem(0, item);
+    var top = server.createInventory(null, 9);
+    var view =
+        new org.mockbukkit.mockbukkit.inventory.SimpleInventoryViewMock(
+            attacker, top, attacker.getInventory(), InventoryType.CHEST) {
+          @Override
+          public int convertSlot(int slot) {
+            return slot < 9 ? slot : slot - 9;
+          }
+
+          @Override
+          public org.bukkit.inventory.Inventory getInventory(int slot) {
+            return slot < 0 ? null : slot < 9 ? top : attacker.getInventory();
+          }
+        };
+
+    for (ClickType click :
+        java.util.List.of(
+            ClickType.LEFT,
+            ClickType.RIGHT,
+            ClickType.SHIFT_LEFT,
+            ClickType.DOUBLE_CLICK,
+            ClickType.NUMBER_KEY)) {
+      var event =
+          new InventoryClickEvent(
+              view, InventoryType.SlotType.CONTAINER, 9, click, InventoryAction.PICKUP_ALL, 1);
+      server.getPluginManager().callEvent(event);
+      assertFalse(event.isCancelled(), click.name());
+    }
+    var drag = new InventoryDragEvent(view, item, item, false, java.util.Map.of(9, item.clone()));
+    server.getPluginManager().callEvent(drag);
+    assertFalse(drag.isCancelled());
+    var source = server.createInventory(null, 9);
+    var destination = server.createInventory(null, 9);
+    source.setItem(0, item);
+    var move =
+        new org.bukkit.event.inventory.InventoryMoveItemEvent(source, item, destination, true);
+    server.getPluginManager().callEvent(move);
+    assertFalse(move.isCancelled());
+    var first = attacker.getWorld().dropItem(attacker.getLocation(), item);
+    var second = attacker.getWorld().dropItem(attacker.getLocation(), another);
+    var merge = new org.bukkit.event.entity.ItemMergeEvent(first, second);
+    server.getPluginManager().callEvent(merge);
+    assertFalse(merge.isCancelled());
+  }
+
+  @Test
+  void oldBundlesConvertOnPickupAndCopiedOldBundlesCannotConvertAgain() throws Exception {
+    java.util.UUID id = java.util.UUID.randomUUID();
+    State current = plugin.progression().snapshot();
+    var path = directory.resolve("legacy.yml");
+    var store = new YamlStateStore(path);
+    store.save(
+        new State(
+            current.players(),
+            current.pairs(),
+            java.util.Map.of(
+                id, new ItemToken(attacker.getUniqueId(), ItemToken.Kind.CRAFTED_STRENGTH))));
+    var yaml = YamlConfiguration.loadConfiguration(path.toFile());
+    yaml.set("schema", 3);
+    yaml.save(path.toFile());
+    var replacement = new Progression(store, plugin.settings());
+    var field = EpicSmpPlugin.class.getDeclaredField("progression");
+    field.setAccessible(true);
+    field.set(plugin, replacement);
+    var old = plugin.items().item(ItemToken.Kind.CRAFTED_STRENGTH);
+    var meta = old.getItemMeta();
+    meta.getPersistentDataContainer().remove(new org.bukkit.NamespacedKey(plugin, "item_format"));
+    meta.getPersistentDataContainer()
+        .set(
+            new org.bukkit.NamespacedKey(plugin, "strength_bottle"),
+            org.bukkit.persistence.PersistentDataType.STRING,
+            id.toString());
+    old.setItemMeta(meta);
+    final var copied = old.clone();
+    var ground = attacker.getWorld().dropItem(attacker.getLocation(), old);
+    var pickup = new EntityPickupItemEvent(attacker, ground, 0);
+    server.getPluginManager().callEvent(pickup);
+    assertFalse(pickup.isCancelled());
+    assertTrue(ground.isValid());
+    assertTrue(
+        ground.getItemStack().isSimilar(plugin.items().item(ItemToken.Kind.CRAFTED_STRENGTH)));
+    assertTrue(replacement.snapshot().bottles().isEmpty());
+    assertTrue(new YamlStateStore(path).load().bottles().isEmpty());
+    victim.getInventory().setItemInMainHand(copied);
+    useCustom(victim, EquipmentSlot.HAND);
+    assertEquals(1, replacement.profile(victim.getUniqueId()).strength());
+    assertEquals(copied, victim.getInventory().getItemInMainHand());
+    nativePickup(attacker, ground);
+    useCustom(attacker, EquipmentSlot.HAND);
+    assertEquals(2, replacement.profile(attacker.getUniqueId()).strength());
+    assertEquals(1, replacement.profile(attacker.getUniqueId()).craftedStrength());
+  }
+
+  @Test
+  void groupedInteractionsPersistTogetherAndIndividualOptionsHaveClickableToggles()
+      throws IOException {
+    attacker.setOp(true);
+    plugin.vanish().setVanished(attacker, true);
+    attacker.performCommand("vanish interactions on");
+    for (String option : Settings.VANISH_INTERACTION_GUARDS) {
+      assertFalse(plugin.settings().flag("vanish." + option), option);
+    }
+    assertTrue(plugin.vanish().picksUp(attacker));
+    assertFalse(plugin.settings().flag("vanish.silent-container-inspection"));
+    assertTrue(plugin.settings().flag("vanish.prevent-incoming-damage"));
+    assertFalse(plugin.vanish().publicChat(attacker.getUniqueId()));
+    plugin.reloadRules();
+    assertFalse(plugin.settings().flag("vanish.prevent-attacking"));
+    attacker.performCommand("vanish interactions toggle");
+    for (String option : Settings.VANISH_INTERACTION_GUARDS) {
+      assertTrue(plugin.settings().flag("vanish." + option), option);
+    }
+    assertFalse(plugin.vanish().picksUp(attacker));
+    while (attacker.nextComponentMessage() != null) {}
+    attacker.performCommand("vanish options");
+    Component message;
+    boolean found = false;
+    while ((message = attacker.nextComponentMessage()) != null) {
+      if (plain(message).startsWith("prevent-item-drop ")) {
+        var click = message.children().getFirst().clickEvent();
+        assertNotNull(click);
+        assertEquals(
+            net.kyori.adventure.text.event.ClickEvent.runCommand(
+                "/vanish option prevent-item-drop toggle"),
+            click);
+        found = true;
+      }
+    }
+    assertTrue(found);
+    attacker.performCommand("vanish option prevent-item-drop toggle");
+    assertFalse(plugin.settings().flag("vanish.prevent-item-drop"));
+    victim.performCommand("vanish interactions on");
+    assertTrue(plugin.settings().flag("vanish.prevent-attacking"));
+  }
+
+  @Test
+  void withdrawalUsesMatchingStackCapacityBeforeEmptySlotsAndPreservesBothKinds()
+      throws IOException {
+    plugin.progression().redeem(attacker.getUniqueId(), ItemToken.Kind.CRAFTED_STRENGTH);
+    plugin.progression().redeem(attacker.getUniqueId(), ItemToken.Kind.CRAFTED_STRENGTH);
+    plugin.progression().redeem(attacker.getUniqueId(), ItemToken.Kind.STRENGTH);
+    for (int slot = 0; slot < 36; slot++) {
+      attacker.getInventory().setItem(slot, new ItemStack(Material.STONE, 64));
+    }
+    attacker.getInventory().setItem(0, null);
+    var crafted = plugin.items().item(ItemToken.Kind.CRAFTED_STRENGTH);
+    crafted.setAmount(62);
+    attacker.getInventory().setItem(1, crafted);
+    plugin.items().withdraw(attacker, 3);
+    assertEquals(1, plugin.progression().profile(attacker.getUniqueId()).strength());
+    assertEquals(0, plugin.progression().profile(attacker.getUniqueId()).craftedStrength());
+    assertEquals(64, attacker.getInventory().getItem(1).getAmount());
+    assertTrue(
+        attacker.getInventory().getItem(0).isSimilar(plugin.items().item(ItemToken.Kind.STRENGTH)));
+    assertEquals(1, attacker.getInventory().getItem(0).getAmount());
+  }
+
+  @Test
+  void revealedAutoVanishPlayerStaysVisibleAcrossRespawnWorldAndModeChanges() throws IOException {
+    attacker.addAttachment(plugin, "epicsmp.vanish.auto", true);
+    plugin.vanish().left(attacker);
+    plugin.vanish().prepareJoin(attacker);
+    assertTrue(plugin.vanish().isVanished(attacker.getUniqueId()));
+    plugin.vanish().setVanished(attacker, false);
+    // A second phase of the same login must preserve an explicit reveal as well.
+    plugin.vanish().joined(attacker);
+    assertFalse(plugin.vanish().isVanished(attacker.getUniqueId()));
+    var respawn = org.mockito.Mockito.mock(org.bukkit.event.player.PlayerRespawnEvent.class);
+    org.mockito.Mockito.when(respawn.getPlayer()).thenReturn(attacker);
+    org.mockito.Mockito.when(respawn.getHandlers())
+        .thenReturn(org.bukkit.event.player.PlayerRespawnEvent.getHandlerList());
+    server.getPluginManager().callEvent(respawn);
+    server.getScheduler().performTicks(1);
+    assertFalse(plugin.vanish().isVanished(attacker.getUniqueId()));
+    assertTrue(victim.canSee(attacker));
+    server
+        .getPluginManager()
+        .callEvent(
+            new org.bukkit.event.player.PlayerChangedWorldEvent(attacker, attacker.getWorld()));
+    attacker.setGameMode(GameMode.CREATIVE);
+    server.getScheduler().performTicks(21);
+    plugin.reloadRules();
+    assertFalse(plugin.vanish().isVanished(attacker.getUniqueId()));
+    plugin.vanish().left(attacker);
+    plugin.vanish().prepareJoin(attacker);
+    assertTrue(plugin.vanish().isVanished(attacker.getUniqueId()));
+  }
+
+  @Test
+  void vanishedCreativePlayersCanUseWithdrawAndRerollItemsWithNormalCaps() throws IOException {
+    attacker.setOp(true);
+    plugin.vanish().setVanished(attacker, true);
+    attacker.setGameMode(GameMode.CREATIVE);
+    server.getScheduler().performTicks(1);
+    var crafted = plugin.items().item(ItemToken.Kind.CRAFTED_STRENGTH);
+    crafted.setAmount(3);
+    attacker.getInventory().setItemInMainHand(crafted);
+    useCustom(attacker, EquipmentSlot.HAND);
+    useCustom(attacker, EquipmentSlot.HAND);
+    useCustom(attacker, EquipmentSlot.HAND);
+    assertEquals(3, plugin.progression().profile(attacker.getUniqueId()).strength());
+    assertEquals(1, attacker.getInventory().getItemInMainHand().getAmount());
+    attacker.getInventory().setItemInMainHand(plugin.items().item(ItemToken.Kind.STRENGTH));
+    useCustom(attacker, EquipmentSlot.HAND);
+    assertEquals(4, plugin.progression().profile(attacker.getUniqueId()).strength());
+    plugin.items().withdraw(attacker, 3);
+    assertEquals(1, plugin.progression().profile(attacker.getUniqueId()).strength());
+    var original = plugin.progression().profile(attacker.getUniqueId()).weapon();
+    attacker.getInventory().setItemInMainHand(plugin.items().item(ItemToken.Kind.REROLL));
+    useCustom(attacker, EquipmentSlot.HAND);
+    assertFalse(original == plugin.progression().profile(attacker.getUniqueId()).weapon());
+    assertTrue(
+        attacker.getInventory().getItemInMainHand() == null
+            || attacker.getInventory().getItemInMainHand().getType().isAir());
+    assertEquals(GameMode.CREATIVE, attacker.getGameMode());
+    assertTrue(plugin.vanish().isVanished(attacker.getUniqueId()));
+  }
+
+  @Test
+  void combatTaggedFallDeathConvertsLostCraftedStrengthToRegularDrop() throws IOException {
+    plugin.progression().set(attacker.getUniqueId(), "strength", 5);
+    plugin.progression().redeem(victim.getUniqueId(), ItemToken.Kind.CRAFTED_STRENGTH);
+    attack(4);
+    var death =
+        new PlayerDeathEvent(
+            victim,
+            DamageSource.builder(DamageType.FALL).build(),
+            new ArrayList<>(),
+            0,
+            (Component) null,
+            true);
+    server.getPluginManager().callEvent(death);
+    assertEquals(1, plugin.progression().profile(attacker.getUniqueId()).kills());
+    assertEquals(0, plugin.progression().profile(victim.getUniqueId()).craftedStrength());
+    var drops =
+        victim.getWorld().getEntities().stream()
+            .filter(org.bukkit.entity.Item.class::isInstance)
+            .map(org.bukkit.entity.Item.class::cast)
+            .map(org.bukkit.entity.Item::getItemStack)
+            .toList();
+    assertEquals(1, drops.size());
+    assertTrue(drops.getFirst().isSimilar(plugin.items().item(ItemToken.Kind.STRENGTH)));
+  }
+
   private void menuClick(int slot) {
     InventoryClickEvent click =
         new InventoryClickEvent(
@@ -1278,6 +2019,17 @@ class PluginIntegrationTest {
 
   private static class TestServerMock extends ServerMock {
     private boolean stopping;
+    private final com.destroystokyo.paper.entity.ai.MobGoals goals =
+        org.mockito.Mockito.mock(com.destroystokyo.paper.entity.ai.MobGoals.class);
+
+    @Override
+    @edu.umd.cs.findbugs.annotations.SuppressFBWarnings(
+        value = "EI_EXPOSE_REP",
+        justification =
+            "MockBukkit transport boundary exposes the same shared goal manager as Paper")
+    public com.destroystokyo.paper.entity.ai.MobGoals getMobGoals() {
+      return goals;
+    }
 
     @Override
     public boolean isStopping() {

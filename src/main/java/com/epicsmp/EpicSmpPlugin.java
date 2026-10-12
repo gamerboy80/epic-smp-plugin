@@ -29,11 +29,12 @@ public class EpicSmpPlugin extends JavaPlugin {
   private final Map<UUID, Integer> notices = new HashMap<>();
   private SmpItems items;
   private WeaponAbilities abilities;
-  private Settings settings;
+  private VanishService vanish;
+  private volatile Settings settings;
   private Progression progression;
   private NamespacedKey strengthKey;
-  private boolean paused;
-  private boolean storageFailed;
+  private volatile boolean paused;
+  private volatile boolean storageFailed;
 
   @Override
   public void onEnable() {
@@ -58,6 +59,14 @@ public class EpicSmpPlugin extends JavaPlugin {
     getServer().getPluginManager().registerEvents(items, this);
     getServer().getPluginManager().registerEvents(abilities, this);
     items.recipes();
+    try {
+      vanish = new VanishService(this);
+      vanish.start();
+    } catch (IOException | IllegalStateException e) {
+      getLogger().severe("Cannot initialize vanish: " + e.getMessage());
+      Bukkit.getPluginManager().disablePlugin(this);
+      return;
+    }
     registerCommand("smp", "Strength SMP management", List.of("epicsmp"), new SmpCommand(this));
     for (Player player : Bukkit.getOnlinePlayers()) {
       initialize(player);
@@ -67,6 +76,9 @@ public class EpicSmpPlugin extends JavaPlugin {
 
   @Override
   public void onDisable() {
+    if (vanish != null) {
+      vanish.stop();
+    }
     combat.clearAll();
     notices.clear();
     if (items != null) {
@@ -102,6 +114,9 @@ public class EpicSmpPlugin extends JavaPlugin {
     }
     progression.normalize(next);
     settings = next;
+    if (vanish != null) {
+      vanish.reload();
+    }
     if (items != null) {
       items.recipes();
     }
@@ -113,8 +128,13 @@ public class EpicSmpPlugin extends JavaPlugin {
 
   /** Validates and atomically saves a dashboard rule edit before activating it. */
   void updateRule(String path, Object value) throws IOException {
+    updateRules(Map.of(path, value));
+  }
+
+  /** Validates and persists a group of rule changes as one configuration transaction. */
+  void updateRules(Map<String, ?> changes) throws IOException {
     YamlConfiguration next = settings.copy();
-    next.set(path, value);
+    changes.forEach(next::set);
     new Settings(next);
     Path destination = getDataFolder().toPath().resolve("config.yml");
     Path temporary = getDataFolder().toPath().resolve("config.yml.tmp");
@@ -134,6 +154,15 @@ public class EpicSmpPlugin extends JavaPlugin {
   /** Returns the active configuration snapshot. */
   public Settings settings() {
     return settings;
+  }
+
+  /** Returns the vanish visibility service for integrations. */
+  @edu.umd.cs.findbugs.annotations.SuppressFBWarnings(
+      value = "EI_EXPOSE_REP",
+      justification =
+          "Public integration service; state changes enforce main-thread and gameplay guards")
+  public VanishService vanish() {
+    return vanish;
   }
 
   /** Returns the progression engine. */
@@ -261,7 +290,10 @@ public class EpicSmpPlugin extends JavaPlugin {
 
   /** Checks whether world and game mode participate in combat/progression. */
   public boolean active(Player player) {
-    return (player.getGameMode() == org.bukkit.GameMode.SURVIVAL
+    return (vanish == null
+            || !vanish.isVanished(player.getUniqueId())
+            || !settings.flag("vanish.suspend-progression"))
+        && (player.getGameMode() == org.bukkit.GameMode.SURVIVAL
             || player.getGameMode() == org.bukkit.GameMode.ADVENTURE)
         && !settings.strings("combat.excluded-worlds").contains(player.getWorld().getName());
   }
@@ -337,10 +369,9 @@ public class EpicSmpPlugin extends JavaPlugin {
               ? NamedTextColor.GREEN
               : NamedTextColor.RED;
       notice =
-          notice
-              .append(
-                  Component.text(Integer.toString(profile.strength()), levelColor)
-                      .decorate(TextDecoration.BOLD));
+          notice.append(
+              Component.text(Integer.toString(profile.strength()), levelColor)
+                  .decorate(TextDecoration.BOLD));
       player.sendMessage(notice);
     }
   }
