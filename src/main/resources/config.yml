@@ -8,46 +8,6 @@ strength:
   crafted-maximum: 3
   # Flat melee damage above baseline 1; level 5 adds 6 HP (vanilla Strength II).
   damage-per-level: 1.5
-vanish:
-  # Apply changes with /smp reload or /vanish option <name> <on|off>.
-  # The official PacketEvents 2.14.0+ server plugin is required.
-  prevent-combat-entry: true
-  grant-flight: true
-  client-night-vision: true
-  action-bar: true
-  fake-join-quit: true
-  prevent-incoming-damage: true
-  prevent-hunger: true
-  prevent-xp-pickup: true
-  prevent-mob-targeting: true
-  prevent-mob-looking: true
-  prevent-collision: true
-  prevent-spawning: true
-  ignore-sleep: true
-  prevent-gliding: true
-  prevent-physical-triggers: true
-  prevent-vibrations: true
-  prevent-raids: true
-  silent-entities: true
-  silent-block-actions: true
-  silent-container-inspection: true
-  retain-death-inventory: true
-  suspend-progression: true
-  default-item-pickup: false
-  default-chat-public: false
-  prevent-attacking: false
-  prevent-block-breaking: false
-  prevent-block-placing: false
-  prevent-world-interactions: false
-  prevent-entity-interactions: false
-  prevent-item-drop: false
-  prevent-projectiles: false
-  prevent-buckets: false
-  prevent-item-consumption: false
-  prevent-mounting: false
-  prevent-bed-use: false
-  prevent-inventory-access: false
-
 combat:
   # Controls timed immunity and spawn safety together. Off clears saved grace on reload.
   immunity-enabled: false

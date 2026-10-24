@@ -2,9 +2,8 @@ main: ${PACKAGE}.${NAME}
 name: ${NAME}
 version: "${VERSION}"
 api-version: "26.2"
-depend: [packetevents]
-softdepend: [PlaceholderAPI, dynmap, Essentials]
 description: Strength progression and configurable SMP combat management.
+softdepend: [Vanish]
 permissions:
   epicsmp.use:
     description: View Strength, weapon specialties and server rules
@@ -20,18 +19,3 @@ permissions:
   epicsmp.bypass:
     description: Bypass item restrictions, cooldowns, and blocked combat commands
     default: false
-  epicsmp.vanish:
-    description: Toggle your staff vanish
-    default: op
-  epicsmp.vanish.auto:
-    description: Always join vanished, including after leaving visibly
-    default: false
-  epicsmp.vanish.see:
-    description: See vanished staff and receive private vanish notices
-    default: op
-  epicsmp.vanish.others:
-    description: Toggle vanish for other online players and list vanished staff
-    default: op
-  epicsmp.vanish.inspect:
-    description: Silently inspect a container snapshot while vanished
-    default: op

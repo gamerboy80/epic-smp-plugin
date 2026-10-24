@@ -202,12 +202,6 @@ public final class GameplayListener implements Listener {
     long now = System.currentTimeMillis();
     CombatTracker.Tag tag = plugin.combat().tag(victim.getUniqueId(), now);
     Player direct = deathAttacker(event);
-    if (direct != null
-        && plugin.vanish().isVanished(direct.getUniqueId())
-        && plugin.settings().flag("vanish.suspend-progression")) {
-      plugin.combat().clear(victim.getUniqueId());
-      return;
-    }
     UUID killer = direct != null && plugin.active(direct) ? direct.getUniqueId() : null;
     if (killer == null
         && tag != null

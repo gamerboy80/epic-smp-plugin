@@ -1,5 +1,7 @@
 package com.epicsmp;
 
+import dev.vanish.bukkit.event.VanishStateChangedEvent;
+import dev.vanish.common.VanishAPI;
 import java.io.IOException;
 import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
@@ -21,6 +23,8 @@ import org.bukkit.attribute.AttributeModifier;
 import org.bukkit.configuration.InvalidConfigurationException;
 import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.entity.Player;
+import org.bukkit.event.EventHandler;
+import org.bukkit.event.Listener;
 import org.bukkit.plugin.java.JavaPlugin;
 
 /** Paper 26.2 entry point for Strength SMP and combat management. */
@@ -29,7 +33,6 @@ public class EpicSmpPlugin extends JavaPlugin {
   private final Map<UUID, Integer> notices = new HashMap<>();
   private SmpItems items;
   private WeaponAbilities abilities;
-  private VanishService vanish;
   private volatile Settings settings;
   private Progression progression;
   private NamespacedKey strengthKey;
@@ -54,19 +57,12 @@ public class EpicSmpPlugin extends JavaPlugin {
     getServer().getPluginManager().registerEvents(new RuleListener(this), this);
     getServer().getPluginManager().registerEvents(new LimitListener(this), this);
     getServer().getPluginManager().registerEvents(new AdminDashboard(this), this);
+    getServer().getPluginManager().registerEvents(new VanishListener(), this);
     items = new SmpItems(this);
     abilities = new WeaponAbilities(this);
     getServer().getPluginManager().registerEvents(items, this);
     getServer().getPluginManager().registerEvents(abilities, this);
     items.recipes();
-    try {
-      vanish = new VanishService(this);
-      vanish.start();
-    } catch (IOException | IllegalStateException e) {
-      getLogger().severe("Cannot initialize vanish: " + e.getMessage());
-      Bukkit.getPluginManager().disablePlugin(this);
-      return;
-    }
     registerCommand("smp", "Strength SMP management", List.of("epicsmp"), new SmpCommand(this));
     for (Player player : Bukkit.getOnlinePlayers()) {
       initialize(player);
@@ -76,9 +72,6 @@ public class EpicSmpPlugin extends JavaPlugin {
 
   @Override
   public void onDisable() {
-    if (vanish != null) {
-      vanish.stop();
-    }
     combat.clearAll();
     notices.clear();
     if (items != null) {
@@ -114,9 +107,6 @@ public class EpicSmpPlugin extends JavaPlugin {
     }
     progression.normalize(next);
     settings = next;
-    if (vanish != null) {
-      vanish.reload();
-    }
     if (items != null) {
       items.recipes();
     }
@@ -154,15 +144,6 @@ public class EpicSmpPlugin extends JavaPlugin {
   /** Returns the active configuration snapshot. */
   public Settings settings() {
     return settings;
-  }
-
-  /** Returns the vanish visibility service for integrations. */
-  @edu.umd.cs.findbugs.annotations.SuppressFBWarnings(
-      value = "EI_EXPOSE_REP",
-      justification =
-          "Public integration service; state changes enforce main-thread and gameplay guards")
-  public VanishService vanish() {
-    return vanish;
   }
 
   /** Returns the progression engine. */
@@ -290,10 +271,7 @@ public class EpicSmpPlugin extends JavaPlugin {
 
   /** Checks whether world and game mode participate in combat/progression. */
   public boolean active(Player player) {
-    return (vanish == null
-            || !vanish.isVanished(player.getUniqueId())
-            || !settings.flag("vanish.suspend-progression"))
-        && (player.getGameMode() == org.bukkit.GameMode.SURVIVAL
+    return (player.getGameMode() == org.bukkit.GameMode.SURVIVAL
             || player.getGameMode() == org.bukkit.GameMode.ADVENTURE)
         && !settings.strings("combat.excluded-worlds").contains(player.getWorld().getName());
   }
@@ -388,5 +366,20 @@ public class EpicSmpPlugin extends JavaPlugin {
   /** Resets chat notification tracking when a player leaves. */
   void forgetNotices(Player player) {
     notices.remove(player.getUniqueId());
+  }
+
+  /** Synchronizes Strength SMP state when a cross-plugin vanished player toggles. */
+  private final class VanishListener implements Listener {
+    @EventHandler
+    public void onVanishStateChange(VanishStateChangedEvent event) {
+      Player player = event.getPlayer();
+      UUID id = player.getUniqueId();
+      if (event.isVanished()) {
+        abilities.clear(player);
+        combat.clear(id);
+      } else {
+        refresh(player);
+      }
+    }
   }
 }

@@ -23,29 +23,19 @@ configurable combat management.
   and join/respawn grace. The Shield specialty's earned ultimate has its own toggle.
 - Strength changes appear in chat. Invisible killers receive anonymous death messages by default,
   controlled by `display.hide-invisible-killers`.
-- Staff vanish with PacketEvents filtering, automatic join permissions, private status, silent
-  container inspection, private/public chat modes, configurable world interactions, persistent state
-  and viewer-specific scoreboard protection.
+- Staff vanish now ships as the separate cross-version **Vanish** plugin in the sibling
+  `vanish-plugin` project.
 - Six-row admin inventory dashboard, player selectors, persistent rule toggles and a playtest toolbox.
 - Atomic UUID-based YAML snapshots, previous-commit backups, offline admin edits and validated reloads.
 
 ## Install and commands
 
 Build with `./gradlew build integrationTest`, or copy `build/libs/EpicSmpPlugin.jar` from a stable
-release to the server's `plugins/` directory alongside
-[PacketEvents 2.14.0 or newer](https://github.com/retrooper/packetevents/releases), then restart.
-Use the official Spigot/Paper PacketEvents server JAR. PlaceholderAPI, Essentials and Dynmap
-integrations activate when those plugins are installed.
+release to the server's `plugins/` directory, then restart. PacketEvents is no longer required;
+staff vanish moved to the standalone `vanish-plugin` jar.
 
 | Command | Purpose |
 | --- | --- |
-| `/vanish` / `/v` | Toggle your staff vanish |
-| `/vanish on` / `off` / `status` | Set or inspect vanish state |
-| `/vanish on <player>` / `off <player>` | Manage another online staff member |
-| `/vanish list` / `pickup` / `inspect` | Staff roster, item pickup and silent container snapshot |
-| `/vanish chat private` / `public` | Choose your vanished chat audience |
-| `/vanish options` / `option <name> <on\|off\|toggle>` | Clickable settings and tab-completed switches |
-| `/vanish interactions [on\|off\|toggle\|status]` | Toggle world/inventory interactions together |
 | `/smp stats [player or UUID]` | Strength, specialty and kill/death statistics |
 | `/smp rules` | Inspect current restrictions |
 | `/smp withdraw [amount]` | Withdraw levels while keeping at least 1 |
@@ -62,9 +52,9 @@ integrations activate when those plugins are installed.
 `epicsmp.admin.test`. `epicsmp.bypass` defaults **false even for operators**; it bypasses equipment,
 season and cooldown restrictions, but never progression persistence, immunity or a PvP pause.
 
-`epicsmp.vanish.auto` defaults false and vanishes its holder once on login for each connection.
-`epicsmp.vanish`, `.vanish.see`, `.vanish.others` and `.vanish.inspect` default op.
-Read [the vanish guide](docs/usage.md#staff-vanish) for privacy behavior and integrations.
+Staff vanish is provided by the standalone `vanish-plugin` jar. See that project's README for
+commands, permissions and the supported 1.8.8-26.x matrix. Bucket integrations (PlaceholderAPI,
+Essentials, dynmap) belong to that plugin now.
 
 ## Documentation and verification
 
